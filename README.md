@@ -28,12 +28,20 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 
 ## Install Locally
 
+Download the packaged extension from either:
+
+- GitHub Releases: `chrono-extension-v0.1.0.zip`
+- Repository artifact: `releases/chrono-extension-v0.1.0.zip`
+
+Then:
+
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
-4. Select the `extension` directory in this repository.
-5. Open a Bilibili video page, for example `https://www.bilibili.com/video/BV...`.
-6. Click the Chrono extension icon.
+4. Extract the zip file.
+5. Select the extracted `extension` directory.
+6. Open a Bilibili video page, for example `https://www.bilibili.com/video/BV...`.
+7. Click the Chrono extension icon.
 
 ## Usage
 

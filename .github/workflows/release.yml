@@ -1,0 +1,33 @@
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package extension
+        run: |
+          mkdir -p dist
+          zip -r "dist/chrono-extension-${GITHUB_REF_NAME}.zip" extension \
+            -x "*/.DS_Store" \
+            -x "extension/icons/chrono-icon-source.png"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "dist/chrono-extension-${GITHUB_REF_NAME}.zip" \
+            --title "Chrono ${GITHUB_REF_NAME}" \
+            --notes "Install by downloading the zip, extracting it, and loading the extracted extension directory from chrome://extensions."

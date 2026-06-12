@@ -1,3 +1,16 @@
+<img width="150" height="150" alt="icon" src="https://github.com/user-attachments/assets/469378f8-55b1-4ac8-a483-0c92bacfca85" /><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Cat icon">
+  <rect x="0" y="0" width="128" height="128" fill="#ffffff"/>
+  <path d="M24 47 20 13l29 22a56 56 0 0 1 30 0l29-22-4 34a52 52 0 1 1-80 0Z" fill="#f6bf62"/>
+  <path d="M33 39 29 25l13 10" fill="#e87972"/>
+  <path d="M95 39 99 25l-13 10" fill="#e87972"/>
+  <ellipse cx="45" cy="65" rx="6" ry="8" fill="#111827"/>
+  <ellipse cx="83" cy="65" rx="6" ry="8" fill="#111827"/>
+  <path d="M64 76 57 70h14l-7 6Z" fill="#111827"/>
+  <path d="M64 76v9" stroke="#111827" stroke-width="5" stroke-linecap="round"/>
+  <path d="M53 89c6 6 16 6 22 0" fill="none" stroke="#111827" stroke-width="5" stroke-linecap="round"/>
+  <path d="M28 76h22M28 88h22M78 76h22M78 88h22" stroke="#111827" stroke-width="5" stroke-linecap="round" opacity="0.72"/>
+</svg>
+
 # Chrono
 
 Chrono is a Chrome / Chromium extension for extracting subtitles from the current Bilibili video page and optionally generating an AI summary from the transcript.

@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Caption Extension",
+  "description": "Extract subtitles from the current Bilibili video page.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "host_permissions": [
+    "https://www.bilibili.com/*",
+    "https://api.bilibili.com/*",
+    "https://api.openai.com/*",
+    "https://api.deepseek.com/*",
+    "https://dashscope.aliyuncs.com/*",
+    "https://dashscope-us.aliyuncs.com/*",
+    "https://*.aliyuncs.com/*",
+    "https://api.minimax.io/*",
+    "https://api.minimaxi.com/*",
+    "https://aisubtitle.hdslb.com/*",
+    "https://*.hdslb.com/*",
+    "https://*.bilivideo.com/*"
+  ],
+  "action": {
+    "default_title": "Extract captions",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.bilibili.com/video/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected/bilibili-page.js"],
+      "matches": ["https://www.bilibili.com/*"]
+    }
+  ]
+}

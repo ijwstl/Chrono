@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bilibili 字幕提取</title>
+    <link rel="stylesheet" href="./popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Caption Flow</p>
+          <h1>视频字幕助手</h1>
+        </div>
+        <span id="pageStatus" class="status">检测中</span>
+      </header>
+
+      <section class="card video">
+        <div class="meta-row">
+          <span>当前页面</span>
+          <strong id="videoId">-</strong>
+        </div>
+        <h2 id="videoTitle">等待检测视频页面</h2>
+        <p id="videoAuthor" class="muted"></p>
+      </section>
+
+      <section class="card controls">
+        <button id="loadTracksButton" class="primary" type="button">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4 4v-4.5A2.5 2.5 0 0 1 4 13.5v-8Z"/><path d="M8 8h8M8 11.5h5"/></svg>
+          <span class="button-label">获取字幕轨道</span>
+        </button>
+
+        <label class="field" for="trackSelect">
+          <span>字幕语言</span>
+          <select id="trackSelect" disabled>
+            <option value="">尚未加载</option>
+          </select>
+        </label>
+
+        <button id="extractButton" class="secondary" type="button" disabled>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>
+          <span class="button-label">提取字幕</span>
+        </button>
+      </section>
+
+      <section id="resultPanel" class="card result" hidden>
+        <div class="result-head">
+          <div>
+            <span class="muted">片段数</span>
+            <strong id="segmentCount">0</strong>
+          </div>
+          <div>
+            <span class="muted">语言</span>
+            <strong id="selectedLanguage">-</strong>
+          </div>
+        </div>
+
+        <pre id="preview" class="preview"></pre>
+
+        <div class="actions">
+          <button id="copyMarkdownButton" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H4V4h12v2"/></svg>
+            <span class="button-label">复制 MD</span>
+          </button>
+          <button id="downloadMarkdownButton" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>
+            <span class="button-label">下载 MD</span>
+          </button>
+          <button id="downloadJsonButton" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"/></svg>
+            <span class="button-label">JSON</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="card ai">
+        <div class="section-title">
+          <div>
+            <h2>AI 总结</h2>
+            <p class="muted">支持 OpenAI、DeepSeek、Qwen、MiniMax 等兼容接口。</p>
+          </div>
+          <button id="toggleAiSettingsButton" class="ghost" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M19 12a7.2 7.2 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a7.2 7.2 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 3.1h5l.3-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1Z"/></svg>
+            <span class="button-label">设置</span>
+          </button>
+        </div>
+
+        <div id="aiSettings" class="ai-settings" hidden>
+          <label class="field" for="providerSelect">
+            <span>供应商</span>
+            <select id="providerSelect">
+              <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="qwen">Qwen / 阿里云百炼</option>
+              <option value="minimax">MiniMax</option>
+              <option value="custom">自定义兼容接口</option>
+            </select>
+          </label>
+
+          <label class="field" for="apiKeyInput">
+            <span id="apiKeyLabel">API Key</span>
+            <input id="apiKeyInput" type="password" autocomplete="off" placeholder="sk-...">
+          </label>
+
+          <div class="split">
+            <label class="field" for="modelInput">
+              <span>模型</span>
+              <input id="modelInput" type="text" autocomplete="off" value="gpt-5.5">
+            </label>
+            <label class="field" for="baseUrlInput">
+              <span>Base URL</span>
+              <input id="baseUrlInput" type="url" autocomplete="off" value="https://api.openai.com/v1">
+            </label>
+          </div>
+
+          <button id="saveAiSettingsButton" type="button">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>
+            <span class="button-label">保存设置</span>
+          </button>
+        </div>
+
+        <button id="summarizeButton" class="primary soft" type="button" disabled>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 4.2L18 8.6l-4.2 1.5L12 15l-1.8-4.9L6 8.6l4.6-1.4L12 3Z"/><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z"/></svg>
+          <span class="button-label">AI 总结字幕</span>
+        </button>
+        <pre id="summaryPreview" class="summary" hidden></pre>
+        <div class="actions ai-actions">
+          <button id="copySummaryButton" type="button" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H4V4h12v2"/></svg>
+            <span class="button-label">复制总结</span>
+          </button>
+          <button id="downloadSummaryButton" type="button" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>
+            <span class="button-label">下载总结</span>
+          </button>
+        </div>
+      </section>
+
+      <p id="message" class="message" role="status"></p>
+    </main>
+
+    <script src="./popup.js"></script>
+  </body>
+</html>

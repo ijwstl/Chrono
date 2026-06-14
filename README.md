@@ -21,7 +21,7 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 - Lists available subtitle tracks.
 - Extracts the selected subtitle track.
 - Previews subtitle segments in the popup.
-- Exports transcripts as Markdown or JSON.
+- Exports transcripts as Markdown, SRT, TXT, or JSON.
 - Copies Markdown transcript to the clipboard.
 - Generates optional AI summaries through OpenAI-compatible Chat Completions APIs.
 - Supports provider presets for OpenAI, DeepSeek, Qwen / Alibaba Cloud Model Studio, MiniMax, and custom compatible endpoints.
@@ -30,8 +30,8 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 
 Download the packaged extension from either:
 
-- GitHub Releases: `chrono-extension-v0.2.0.zip`
-- Repository artifact: `releases/chrono-extension-v0.2.0.zip`
+- GitHub Releases: `chrono-extension-v0.2.1.zip`
+- Repository artifact: `releases/chrono-extension-v0.2.1.zip`
 
 Then:
 
@@ -51,6 +51,8 @@ Then:
 4. Use the export actions:
    - **复制 MD**
    - **下载 MD**
+   - **SRT**
+   - **TXT**
    - **JSON**
 5. To use AI summary:
    - Open **AI 总结** settings.

@@ -328,22 +328,18 @@ button.copied {
 
 .actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
 
 .actions button {
   min-width: 0;
-  padding: 0 6px;
+  padding: 0 8px;
   font-size: 11px;
 }
 
-.ai-actions {
-  grid-template-columns: 1fr 1fr;
-}
-
-.ai-settings-actions {
-  grid-template-columns: 1fr 1fr;
+.export-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .ai-settings {

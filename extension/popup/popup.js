@@ -77,12 +77,37 @@ const PLATFORM_CONFIG = {
   }
 };
 
+const EXPORT_FORMATS = {
+  md: {
+    extension: "md",
+    mime: "text/markdown",
+    build: buildMarkdown
+  },
+  json: {
+    extension: "json",
+    mime: "application/json",
+    build: (result) => JSON.stringify(result, null, 2)
+  },
+  srt: {
+    extension: "srt",
+    mime: "application/x-subrip",
+    build: buildSrt
+  },
+  txt: {
+    extension: "txt",
+    mime: "text/plain",
+    build: buildPlainText
+  }
+};
+
 const BUTTON_ICON_HTML = {
   loadTracksButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4 4v-4.5A2.5 2.5 0 0 1 4 13.5v-8Z"/><path d="M8 8h8M8 11.5h5"/></svg>',
   extractButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>',
   copyMarkdownButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H4V4h12v2"/></svg>',
   downloadMarkdownButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>',
   downloadJsonButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"/></svg>',
+  downloadSrtButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7z"/><path d="M10 8h4M10 12h4M10 16h2"/></svg>',
+  downloadTxtButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',
   toggleAiSettingsButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M19 12a7.2 7.2 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a7.2 7.2 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 3.1h5l.3-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1Z"/></svg>',
   saveAiSettingsButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>',
   resetPromptButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>',
@@ -106,6 +131,8 @@ const nodes = {
   copyMarkdownButton: document.getElementById("copyMarkdownButton"),
   downloadMarkdownButton: document.getElementById("downloadMarkdownButton"),
   downloadJsonButton: document.getElementById("downloadJsonButton"),
+  downloadSrtButton: document.getElementById("downloadSrtButton"),
+  downloadTxtButton: document.getElementById("downloadTxtButton"),
   toggleAiSettingsButton: document.getElementById("toggleAiSettingsButton"),
   aiSettings: document.getElementById("aiSettings"),
   providerSelect: document.getElementById("providerSelect"),
@@ -155,6 +182,8 @@ function bindEvents() {
   nodes.copyMarkdownButton.addEventListener("click", copyMarkdown);
   nodes.downloadMarkdownButton.addEventListener("click", () => downloadText("md"));
   nodes.downloadJsonButton.addEventListener("click", () => downloadText("json"));
+  nodes.downloadSrtButton.addEventListener("click", () => downloadText("srt"));
+  nodes.downloadTxtButton.addEventListener("click", () => downloadText("txt"));
   nodes.toggleAiSettingsButton.addEventListener("click", toggleAiSettings);
   nodes.providerSelect.addEventListener("change", applyProviderPreset);
   nodes.resetPromptButton.addEventListener("click", resetPromptToDefault);
@@ -566,6 +595,47 @@ function buildMarkdown(result) {
   return `${lines.join("\n")}\n`;
 }
 
+function buildPlainText(result) {
+  return `${result.segments.map((segment) => segment.text).join("\n")}\n`;
+}
+
+function buildSrt(result) {
+  const blocks = result.segments.map((segment, index, segments) => {
+    const startSeconds = Number(segment.startSeconds) || 0;
+    const endSeconds = resolveSegmentEndSeconds(segment, segments[index + 1]);
+
+    return [
+      String(index + 1),
+      `${formatSrtTime(startSeconds)} --> ${formatSrtTime(endSeconds)}`,
+      sanitizeSrtText(segment.text)
+    ].join("\n");
+  });
+
+  return `${blocks.join("\n\n")}\n`;
+}
+
+function resolveSegmentEndSeconds(segment, nextSegment) {
+  const startSeconds = Number(segment.startSeconds) || 0;
+  const durationSeconds = Number(segment.durationSeconds);
+  if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+    return startSeconds + durationSeconds;
+  }
+
+  const nextStartSeconds = Number(nextSegment?.startSeconds);
+  if (Number.isFinite(nextStartSeconds) && nextStartSeconds > startSeconds) {
+    return nextStartSeconds;
+  }
+
+  return startSeconds + 2;
+}
+
+function sanitizeSrtText(text) {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function copyMarkdown() {
   if (!state.result) return;
 
@@ -577,11 +647,10 @@ async function copyMarkdown() {
 function downloadText(type) {
   if (!state.result) return;
 
-  const text = type === "json" ? JSON.stringify(state.result, null, 2) : buildMarkdown(state.result);
-  const extension = type === "json" ? "json" : "md";
-  const mime = type === "json" ? "application/json" : "text/markdown";
-  const filename = `${safeFilename(state.result.title || state.result.videoId)}.${extension}`;
-  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  const format = EXPORT_FORMATS[type] || EXPORT_FORMATS.md;
+  const text = format.build(state.result);
+  const filename = `${safeFilename(state.result.title || state.result.videoId)}.${format.extension}`;
+  const url = URL.createObjectURL(new Blob([text], { type: `${format.mime};charset=utf-8` }));
 
   chrome.downloads.download({ url, filename, saveAs: true }, () => {
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -697,6 +766,17 @@ function formatTime(totalSeconds) {
     return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
   }
   return `${pad(mm)}:${pad(ss)}`;
+}
+
+function formatSrtTime(totalSeconds) {
+  const totalMilliseconds = Math.max(0, Math.round((Number(totalSeconds) || 0) * 1000));
+  const milliseconds = totalMilliseconds % 1000;
+  const totalWholeSeconds = Math.floor(totalMilliseconds / 1000);
+  const hh = Math.floor(totalWholeSeconds / 3600);
+  const mm = Math.floor((totalWholeSeconds % 3600) / 60);
+  const ss = totalWholeSeconds % 60;
+
+  return `${pad(hh)}:${pad(mm)}:${pad(ss)},${String(milliseconds).padStart(3, "0")}`;
 }
 
 function pad(value) {

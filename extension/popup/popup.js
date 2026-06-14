@@ -357,6 +357,7 @@ async function saveAiSettings() {
   nodes.promptInput.value = prompt;
   nodes.modelInput.value = model;
   nodes.baseUrlInput.value = baseUrl;
+  showButtonFeedback(nodes.saveAiSettingsButton, "已保存", "保存设置");
   setMessage(`${AI_PROVIDERS[provider]?.label || "AI"} 设置已保存。`);
 }
 

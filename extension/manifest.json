@@ -1,12 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Browser Caption Extension",
-  "description": "Extract subtitles from the current Bilibili video page.",
-  "version": "0.1.0",
+  "description": "Extract subtitles from the current Bilibili or YouTube video page.",
+  "version": "0.2.0",
   "permissions": ["activeTab", "scripting", "downloads", "storage"],
   "host_permissions": [
     "https://www.bilibili.com/*",
     "https://api.bilibili.com/*",
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
     "https://api.openai.com/*",
     "https://api.deepseek.com/*",
     "https://dashscope.aliyuncs.com/*",
@@ -36,15 +38,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.bilibili.com/video/*"],
+      "matches": [
+        "https://www.bilibili.com/video/*",
+        "https://www.youtube.com/watch*",
+        "https://www.youtube.com/shorts/*",
+        "https://m.youtube.com/watch*",
+        "https://m.youtube.com/shorts/*"
+      ],
       "js": ["content/content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["injected/bilibili-page.js"],
-      "matches": ["https://www.bilibili.com/*"]
+      "resources": ["injected/bilibili-page.js", "injected/youtube-page.js"],
+      "matches": [
+        "https://www.bilibili.com/*",
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*"
+      ]
     }
   ]
 }

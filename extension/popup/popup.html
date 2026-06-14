@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Bilibili 字幕提取</title>
+    <title>Chrono 字幕提取</title>
     <link rel="stylesheet" href="./popup.css">
   </head>
   <body>
@@ -114,10 +114,21 @@
             </label>
           </div>
 
-          <button id="saveAiSettingsButton" type="button">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>
-            <span class="button-label">保存设置</span>
-          </button>
+          <label class="field prompt-field" for="promptInput">
+            <span>总结提示词</span>
+            <textarea id="promptInput" rows="5" spellcheck="false"></textarea>
+          </label>
+
+          <div class="actions ai-settings-actions">
+            <button id="resetPromptButton" type="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>
+              <span class="button-label">默认提示词</span>
+            </button>
+            <button id="saveAiSettingsButton" type="button">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>
+              <span class="button-label">保存设置</span>
+            </button>
+          </div>
         </div>
 
         <button id="summarizeButton" class="primary soft" type="button" disabled>

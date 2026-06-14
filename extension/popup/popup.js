@@ -8,9 +8,16 @@ const state = {
     provider: "openai",
     apiKey: "",
     model: "gpt-5.5",
-    baseUrl: "https://api.openai.com/v1"
+    baseUrl: "https://api.openai.com/v1",
+    prompt: ""
   }
 };
+
+const DEFAULT_AI_PROMPT = [
+  "你是一个中文视频内容分析助手。",
+  "根据字幕输出结构化总结，不要编造字幕中没有的信息。",
+  "输出包含：一句话概括、要点列表、关键术语、适合复习的时间线。"
+].join("\n");
 
 const AI_PROVIDERS = {
   openai: {
@@ -45,6 +52,31 @@ const AI_PROVIDERS = {
   }
 };
 
+const PLATFORM_CONFIG = {
+  bilibili: {
+    label: "Bilibili",
+    authorLabel: "UP 主",
+    messageTypes: {
+      getTracks: "BCE_GET_BILIBILI_TRACKS",
+      extractSubtitle: "BCE_EXTRACT_BILIBILI_SUBTITLE"
+    },
+    isVideoUrl: isBilibiliVideoUrl,
+    parseVideoId: parseBilibiliVideoId,
+    cleanTitle: cleanBilibiliTitle
+  },
+  youtube: {
+    label: "YouTube",
+    authorLabel: "频道",
+    messageTypes: {
+      getTracks: "BCE_GET_YOUTUBE_TRACKS",
+      extractSubtitle: "BCE_EXTRACT_YOUTUBE_SUBTITLE"
+    },
+    isVideoUrl: isYouTubeVideoUrl,
+    parseVideoId: parseYouTubeVideoId,
+    cleanTitle: cleanYouTubeTitle
+  }
+};
+
 const BUTTON_ICON_HTML = {
   loadTracksButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4 4v-4.5A2.5 2.5 0 0 1 4 13.5v-8Z"/><path d="M8 8h8M8 11.5h5"/></svg>',
   extractButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>',
@@ -53,6 +85,7 @@ const BUTTON_ICON_HTML = {
   downloadJsonButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"/></svg>',
   toggleAiSettingsButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M19 12a7.2 7.2 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 3.1a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a7.2 7.2 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 3.1h5l.3-3.1a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.5c.1-.3.1-.7.1-1Z"/></svg>',
   saveAiSettingsButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5z"/><path d="M8 4v6h8V4"/><path d="M8 20v-6h8v6"/></svg>',
+  resetPromptButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/></svg>',
   summarizeButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.4 4.2L18 8.6l-4.2 1.5L12 15l-1.8-4.9L6 8.6l4.6-1.4L12 3Z"/><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z"/></svg>',
   copySummaryButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H4V4h12v2"/></svg>',
   downloadSummaryButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>'
@@ -80,6 +113,8 @@ const nodes = {
   apiKeyInput: document.getElementById("apiKeyInput"),
   modelInput: document.getElementById("modelInput"),
   baseUrlInput: document.getElementById("baseUrlInput"),
+  promptInput: document.getElementById("promptInput"),
+  resetPromptButton: document.getElementById("resetPromptButton"),
   saveAiSettingsButton: document.getElementById("saveAiSettingsButton"),
   summarizeButton: document.getElementById("summarizeButton"),
   summaryPreview: document.getElementById("summaryPreview"),
@@ -97,19 +132,20 @@ async function init() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   state.tab = tab;
 
-  if (!isBilibiliVideoUrl(tab?.url)) {
+  const platform = getSupportedPlatform(tab?.url);
+  if (!platform) {
     setStatus("不支持", "error");
-    nodes.videoTitle.textContent = "请打开 B 站视频页面";
+    nodes.videoTitle.textContent = "请打开 B 站或 YouTube 视频页面";
     nodes.videoId.textContent = "-";
     nodes.loadTracksButton.disabled = true;
-    setMessage("当前第一版只支持 https://www.bilibili.com/video/BV... 页面。", true);
+    setMessage("支持 https://www.bilibili.com/video/BV... 和 https://www.youtube.com/watch?v=... 页面。", true);
     return;
   }
 
-  const bvid = parseBvid(tab.url);
+  const videoId = parsePlatformVideoId(tab.url, platform);
   setStatus("可提取", "ok");
-  nodes.videoId.textContent = bvid || "-";
-  nodes.videoTitle.textContent = tab.title ? cleanTitle(tab.title) : "已检测到 B 站视频";
+  nodes.videoId.textContent = videoId || "-";
+  nodes.videoTitle.textContent = tab.title ? cleanPlatformTitle(tab.title, platform) : `已检测到 ${getPlatformLabel(platform)} 视频`;
   setMessage("点击获取字幕轨道。");
 }
 
@@ -121,6 +157,7 @@ function bindEvents() {
   nodes.downloadJsonButton.addEventListener("click", () => downloadText("json"));
   nodes.toggleAiSettingsButton.addEventListener("click", toggleAiSettings);
   nodes.providerSelect.addEventListener("change", applyProviderPreset);
+  nodes.resetPromptButton.addEventListener("click", resetPromptToDefault);
   nodes.saveAiSettingsButton.addEventListener("click", saveAiSettings);
   nodes.summarizeButton.addEventListener("click", summarizeWithAi);
   nodes.copySummaryButton.addEventListener("click", copySummary);
@@ -128,12 +165,13 @@ function bindEvents() {
 }
 
 async function loadTracks() {
+  await refreshActiveTab();
   setBusy(nodes.loadTracksButton, true, "获取中");
   setMessage("正在读取当前页面字幕轨道。");
   nodes.resultPanel.hidden = true;
 
   try {
-    const data = await sendToContent("BCE_GET_BILIBILI_TRACKS");
+    const data = await sendToContent(getMessageType("getTracks"));
     state.metadata = data;
     state.tracks = data.availableTracks || [];
     state.result = null;
@@ -141,9 +179,9 @@ async function loadTracks() {
     resetSummary();
     nodes.summarizeButton.disabled = true;
 
-    nodes.videoId.textContent = data.videoId || parseBvid(state.tab.url) || "-";
+    nodes.videoId.textContent = data.videoId || parsePlatformVideoId(state.tab.url, data.platform) || "-";
     nodes.videoTitle.textContent = data.title || "未命名视频";
-    nodes.videoAuthor.textContent = data.author ? `UP 主：${data.author}` : "";
+    nodes.videoAuthor.textContent = data.author ? `${getPlatformAuthorLabel(data.platform)}：${data.author}` : "";
 
     renderTracks();
 
@@ -163,6 +201,19 @@ async function loadTracks() {
 }
 
 async function extractSubtitle() {
+  await refreshActiveTab();
+  const platform = getSupportedPlatform(state.tab?.url);
+  const currentVideoId = parsePlatformVideoId(state.tab?.url, platform);
+  if (state.metadata?.videoId && currentVideoId && state.metadata.videoId !== currentVideoId) {
+    state.result = null;
+    state.summary = "";
+    nodes.extractButton.disabled = true;
+    nodes.summarizeButton.disabled = true;
+    resetSummary();
+    setMessage("当前页面已切换到新视频，请重新获取字幕轨道。", true);
+    return;
+  }
+
   const track = state.tracks.find((item) => item.id === nodes.trackSelect.value);
   if (!track) {
     setMessage("请先选择字幕语言。", true);
@@ -173,7 +224,7 @@ async function extractSubtitle() {
   setMessage("正在拉取字幕内容。");
 
   try {
-    const data = await sendToContent("BCE_EXTRACT_BILIBILI_SUBTITLE", {
+    const data = await sendToContent(getMessageType("extractSubtitle"), {
       track,
       metadata: state.metadata,
       availableTracks: state.tracks
@@ -189,6 +240,11 @@ async function extractSubtitle() {
   } finally {
     setBusy(nodes.extractButton, false, "提取字幕");
   }
+}
+
+async function refreshActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  state.tab = tab || state.tab;
 }
 
 function renderTracks() {
@@ -224,6 +280,7 @@ async function loadAiSettings() {
   const stored = await chrome.storage.local.get([
     "aiProvider",
     "aiProviderSettings",
+    "aiSummaryPrompt",
     "openaiApiKey",
     "openaiModel"
   ]);
@@ -236,11 +293,13 @@ async function loadAiSettings() {
   state.aiSettings.apiKey = saved.apiKey || (provider === "openai" ? stored.openaiApiKey : "") || "";
   state.aiSettings.model = saved.model || (provider === "openai" ? stored.openaiModel : "") || defaults.model;
   state.aiSettings.baseUrl = saved.baseUrl || defaults.baseUrl;
+  state.aiSettings.prompt = normalizePrompt(stored.aiSummaryPrompt);
 
   nodes.providerSelect.value = provider;
   nodes.apiKeyInput.value = state.aiSettings.apiKey;
   nodes.modelInput.value = state.aiSettings.model;
   nodes.baseUrlInput.value = state.aiSettings.baseUrl;
+  nodes.promptInput.value = state.aiSettings.prompt;
   renderProviderLabels();
 }
 
@@ -250,19 +309,23 @@ async function saveAiSettings() {
   const defaults = AI_PROVIDERS[provider] || AI_PROVIDERS.custom;
   const model = nodes.modelInput.value.trim() || defaults.model;
   const baseUrl = normalizeBaseUrl(nodes.baseUrlInput.value.trim() || defaults.baseUrl);
+  const prompt = normalizePrompt(nodes.promptInput.value);
   const stored = await chrome.storage.local.get(["aiProviderSettings"]);
   const aiProviderSettings = stored.aiProviderSettings || {};
   aiProviderSettings[provider] = { apiKey, model, baseUrl };
 
   await chrome.storage.local.set({
     aiProvider: provider,
-    aiProviderSettings
+    aiProviderSettings,
+    aiSummaryPrompt: prompt
   });
 
   state.aiSettings.provider = provider;
   state.aiSettings.apiKey = apiKey;
   state.aiSettings.model = model;
   state.aiSettings.baseUrl = baseUrl;
+  state.aiSettings.prompt = prompt;
+  nodes.promptInput.value = prompt;
   nodes.modelInput.value = model;
   nodes.baseUrlInput.value = baseUrl;
   setMessage(`${AI_PROVIDERS[provider]?.label || "AI"} 设置已保存。`);
@@ -284,6 +347,11 @@ async function applyProviderPreset() {
   nodes.modelInput.value = saved.model || defaults.model;
   nodes.baseUrlInput.value = saved.baseUrl || defaults.baseUrl;
   renderProviderLabels();
+}
+
+function resetPromptToDefault() {
+  nodes.promptInput.value = DEFAULT_AI_PROMPT;
+  setMessage("已恢复默认总结提示词，保存后生效。");
 }
 
 function renderProviderLabels() {
@@ -336,11 +404,7 @@ async function requestAiSummary(result) {
       messages: [
         {
           role: "system",
-          content: [
-            "你是一个中文视频内容分析助手。",
-            "根据字幕输出结构化总结，不要编造字幕中没有的信息。",
-            "输出包含：一句话概括、要点列表、关键术语、适合复习的时间线。"
-          ].join("\n")
+          content: normalizePrompt(state.aiSettings.prompt)
         },
         {
           role: "user",
@@ -393,6 +457,11 @@ function buildChatCompletionsUrl(baseUrl) {
 
 function normalizeBaseUrl(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function normalizePrompt(value) {
+  const prompt = String(value || "").trim();
+  return prompt || DEFAULT_AI_PROMPT;
 }
 
 function trimTranscriptForAi(text) {
@@ -449,6 +518,13 @@ function sendToContent(type, payload = {}) {
   });
 }
 
+function getMessageType(action) {
+  const platform = state.metadata?.platform || getSupportedPlatform(state.tab?.url);
+  const type = PLATFORM_CONFIG[platform]?.messageTypes?.[action];
+  if (!type) throw new Error("当前页面平台不支持该操作。");
+  return type;
+}
+
 function sendMessageToTab(type, payload = {}) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(state.tab.id, { type, payload }, (response) => {
@@ -471,7 +547,7 @@ function sendMessageToTab(type, payload = {}) {
 function buildMarkdown(result) {
   const lines = [
     "---",
-    "platform: bilibili",
+    `platform: ${escapeYaml(result.platform || "unknown")}`,
     `video_id: ${escapeYaml(result.videoId)}`,
     `source: ${escapeYaml(result.url)}`,
     `subtitle_language: ${escapeYaml(result.selectedTrack.language)}`,
@@ -548,16 +624,64 @@ function setMessage(text, isError = false) {
   nodes.message.classList.toggle("error", isError);
 }
 
+function getSupportedPlatform(url) {
+  for (const [platform, config] of Object.entries(PLATFORM_CONFIG)) {
+    if (config.isVideoUrl(url)) return platform;
+  }
+  return "";
+}
+
 function isBilibiliVideoUrl(url) {
   return /^https:\/\/www\.bilibili\.com\/video\/BV/i.test(url || "");
 }
 
-function parseBvid(url) {
+function isYouTubeVideoUrl(url) {
+  try {
+    const parsed = new URL(url || "");
+    const hostname = parsed.hostname;
+    if (hostname !== "www.youtube.com" && hostname !== "m.youtube.com") return false;
+    return (parsed.pathname === "/watch" && parsed.searchParams.has("v")) || /^\/shorts\/[^/]+/.test(parsed.pathname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function parsePlatformVideoId(url, platform) {
+  return PLATFORM_CONFIG[platform]?.parseVideoId(url) || "";
+}
+
+function parseBilibiliVideoId(url) {
   return (url || "").match(/\/video\/(BV[a-zA-Z0-9]+)/i)?.[1] || "";
 }
 
-function cleanTitle(title) {
+function parseYouTubeVideoId(url) {
+  try {
+    const parsed = new URL(url || "");
+    if (parsed.pathname.startsWith("/shorts/")) return parsed.pathname.split("/")[2] || "";
+    return parsed.searchParams.get("v") || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function cleanPlatformTitle(title, platform = getSupportedPlatform(state.tab?.url)) {
+  return PLATFORM_CONFIG[platform]?.cleanTitle(title) || String(title || "").trim();
+}
+
+function cleanBilibiliTitle(title) {
   return title.replace(/_哔哩哔哩_bilibili$/, "").trim();
+}
+
+function cleanYouTubeTitle(title) {
+  return title.replace(/ - YouTube$/, "").trim();
+}
+
+function getPlatformLabel(platform) {
+  return PLATFORM_CONFIG[platform]?.label || "当前平台";
+}
+
+function getPlatformAuthorLabel(platform) {
+  return PLATFORM_CONFIG[platform]?.authorLabel || "作者";
 }
 
 function formatSegment(segment) {
@@ -584,9 +708,9 @@ function escapeYaml(value) {
 }
 
 function safeFilename(value) {
-  return String(value || "bilibili-subtitle")
+  return String(value || "chrono-subtitle")
     .replace(/[\\/:*?"<>|]/g, "_")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 80) || "bilibili-subtitle";
+    .slice(0, 80) || "chrono-subtitle";
 }

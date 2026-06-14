@@ -31,7 +31,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -163,7 +164,8 @@ h2 {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 32px;
   padding: 0 9px;
@@ -175,9 +177,17 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: rgba(22, 119, 255, 0.55);
   box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.11);
+}
+
+textarea {
+  min-height: 96px;
+  padding: 7px 9px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 button {
@@ -224,7 +234,8 @@ button:active:not(:disabled) {
 
 button:disabled,
 input:disabled,
-select:disabled {
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -331,6 +342,10 @@ button.copied {
   grid-template-columns: 1fr 1fr;
 }
 
+.ai-settings-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
 .ai-settings {
   display: grid;
   gap: 7px;
@@ -338,6 +353,10 @@ button.copied {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfcff;
+}
+
+.prompt-field textarea {
+  font: 11px/1.48 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .split {

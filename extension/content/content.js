@@ -11,16 +11,43 @@ let pageScriptInjected = false;
 let pageScriptReady = null;
 const pendingRequests = new Map();
 
+const PLATFORM_CONFIG = {
+  bilibili: {
+    pageScript: "injected/bilibili-page.js",
+    isPage: () => window.location.hostname === "www.bilibili.com"
+  },
+  youtube: {
+    pageScript: "injected/youtube-page.js",
+    isPage: () => window.location.hostname === "www.youtube.com" || window.location.hostname === "m.youtube.com"
+  }
+};
+
+const MESSAGE_ROUTES = {
+  BCE_GET_BILIBILI_TRACKS: { platform: "bilibili", action: "getTracks" },
+  BCE_EXTRACT_BILIBILI_SUBTITLE: { platform: "bilibili", action: "extractSubtitle" },
+  BCE_GET_YOUTUBE_TRACKS: { platform: "youtube", action: "getTracks" },
+  BCE_EXTRACT_YOUTUBE_SUBTITLE: { platform: "youtube", action: "extractSubtitle" },
+  BCE_GET_TRACKS: { platform: null, action: "getTracks" },
+  BCE_EXTRACT_SUBTITLE: { platform: null, action: "extractSubtitle" }
+};
+
+primePageScript();
+
 function injectPageScript() {
-  if (pageScriptInjected || document.getElementById("bce-bilibili-page-script")) {
+  const platform = getCurrentPlatform();
+  const file = PLATFORM_CONFIG[platform]?.pageScript;
+  if (!file) throw new Error("Current page is not supported.");
+
+  const scriptId = `bce-${platform}-page-script`;
+  if (pageScriptInjected || document.getElementById(scriptId)) {
     pageScriptInjected = true;
     return pageScriptReady || Promise.resolve();
   }
 
   pageScriptReady = new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.id = "bce-bilibili-page-script";
-    script.src = chrome.runtime.getURL("injected/bilibili-page.js");
+    script.id = scriptId;
+    script.src = chrome.runtime.getURL(file);
     script.onload = () => {
       script.remove();
       resolve();
@@ -29,12 +56,27 @@ function injectPageScript() {
       pageScriptInjected = false;
       pageScriptReady = null;
       script.remove();
-      reject(new Error("Failed to inject the Bilibili page extractor."));
+      reject(new Error("Failed to inject the page extractor."));
     };
-    (document.documentElement || document.head).appendChild(script);
+    appendPageScript(script);
   });
   pageScriptInjected = true;
   return pageScriptReady;
+}
+
+function appendPageScript(script) {
+  const target = document.documentElement || document.head || document.body;
+  if (target) {
+    target.appendChild(script);
+    return;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => appendPageScript(script), { once: true });
+}
+
+function primePageScript() {
+  if (!getCurrentPlatform()) return;
+  injectPageScript().catch(() => {});
 }
 
 async function sendToPage(action, payload = {}) {
@@ -74,22 +116,26 @@ window.addEventListener("message", (event) => {
   if (message.ok) {
     pending.resolve(message.data);
   } else {
-    pending.reject(new Error(message.error || "Bilibili extraction failed."));
+    pending.reject(new Error(message.error || "Subtitle extraction failed."));
   }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message.type !== "string") return false;
 
-  const actionByType = {
-    BCE_GET_BILIBILI_TRACKS: "getTracks"
-  };
-  const action = actionByType[message.type];
-  if (!action && message.type !== "BCE_EXTRACT_BILIBILI_SUBTITLE") return false;
+  const route = MESSAGE_ROUTES[message.type];
+  if (!route) return false;
 
-  const request = message.type === "BCE_EXTRACT_BILIBILI_SUBTITLE"
-    ? extractSubtitleInContent(message.payload || {})
-    : sendToPage(action, message.payload || {});
+  const currentPlatform = getCurrentPlatform();
+  if (route.platform && route.platform !== currentPlatform) {
+    sendResponse({
+      ok: false,
+      error: `Message ${message.type} cannot run on ${currentPlatform || "unsupported"} page.`
+    });
+    return false;
+  }
+
+  const request = sendToPage(route.action, normalizePayload(message.payload || {}, currentPlatform));
 
   request
     .then((data) => sendResponse({ ok: true, data }))
@@ -98,63 +144,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-async function extractSubtitleInContent(payload) {
-  const track = payload.track;
-  if (!track?.url) {
-    throw new Error("No subtitle track URL was provided.");
-  }
-
-  const subtitleUrl = normalizeSubtitleUrl(track.url);
-  const response = await fetch(subtitleUrl, {
-    credentials: "omit",
-    referrer: window.location.href
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} ${response.statusText} for ${subtitleUrl}`);
-  }
-
-  const subtitle = await response.json();
-  const segments = (subtitle.body || [])
-    .map((item) => ({
-      startSeconds: Number(item.from),
-      durationSeconds: typeof item.from === "number" && typeof item.to === "number" ? item.to - item.from : undefined,
-      text: String(item.content || "").replace(/\s+/g, " ").trim()
-    }))
-    .filter((item) => Number.isFinite(item.startSeconds) && item.text.length > 0);
-
-  if (!segments.length) {
-    throw new Error("Subtitle file was fetched, but it had no readable text segments.");
-  }
-
-  const metadata = payload.metadata || {};
-  const selectedTrack = {
-    ...track,
-    url: subtitleUrl
-  };
-
+function normalizePayload(payload, platform) {
   return {
-    platform: "bilibili",
-    videoId: metadata.videoId || parseBvidFromUrl(window.location.href),
-    url: metadata.url || window.location.href,
-    title: metadata.title || document.title,
-    author: metadata.author,
-    selectedTrack,
-    availableTracks: payload.availableTracks || [selectedTrack],
-    segments,
-    text: segments.map((segment) => segment.text).join("\n"),
-    warnings: []
+    ...payload,
+    platform,
+    metadata: payload.metadata ? { ...payload.metadata, platform: payload.metadata.platform || platform } : payload.metadata,
+    track: payload.track ? { ...payload.track, platform: payload.track.platform || platform } : payload.track,
+    availableTracks: Array.isArray(payload.availableTracks)
+      ? payload.availableTracks.map((track) => ({ ...track, platform: track.platform || platform }))
+      : payload.availableTracks
   };
 }
 
-function normalizeSubtitleUrl(url) {
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("https//")) return url.replace(/^https\/\//, "https://");
-  if (url.startsWith("http//")) return url.replace(/^http\/\//, "http://");
-  return url;
+function getCurrentPlatform() {
+  for (const [platform, config] of Object.entries(PLATFORM_CONFIG)) {
+    if (config.isPage()) return platform;
+  }
+  return "";
 }
 
-function parseBvidFromUrl(url) {
-  return (url || "").match(/\/video\/(BV[a-zA-Z0-9]+)/i)?.[1] || "";
-}
 })();

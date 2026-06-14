@@ -13,7 +13,7 @@
     57, 62, 11, 36, 20, 34, 44, 52
   ];
 
-  function parseBvid(input = location.href) {
+  function parseBilibiliVideoId(input = location.href) {
     const url = new URL(input, location.href);
     const match = url.pathname.match(/\/video\/(BV[a-zA-Z0-9]+)/i);
     if (!match) throw new Error("Could not parse BV id from the current page.");
@@ -41,8 +41,8 @@
   }
 
   async function loadVideoMetadata() {
-    const bvid = parseBvid();
-    const video = await fetchJson(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
+    const bilibiliVideoId = parseBilibiliVideoId();
+    const video = await fetchJson(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bilibiliVideoId)}`);
 
     if (video.code !== 0 || !video.data) {
       throw new Error(`Failed to load video metadata: ${video.message || "unknown error"}`);
@@ -54,7 +54,7 @@
 
     return {
       platform: "bilibili",
-      videoId: bvid,
+      videoId: bilibiliVideoId,
       url: location.href,
       aid,
       cid,
@@ -136,6 +136,7 @@
     const label = track.lan_doc || language;
     return {
       id: String(track.id || `${language}-${label}`),
+      platform: "bilibili",
       language,
       label,
       source: /auto|自动/i.test(label) ? "auto" : "unknown",
@@ -183,7 +184,7 @@
 
     return {
       platform: "bilibili",
-      videoId: metadata.videoId || parseBvid(),
+      videoId: metadata.videoId || parseBilibiliVideoId(),
       url: metadata.url || location.href,
       title: metadata.title || document.title,
       author: metadata.author,

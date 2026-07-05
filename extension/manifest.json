@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Browser Caption Extension",
   "description": "Extract subtitles from the current Bilibili or YouTube video page.",
-  "version": "0.2.2",
-  "permissions": ["activeTab", "scripting", "downloads", "storage"],
+  "version": "0.3.0",
+  "permissions": ["activeTab", "scripting", "downloads", "storage", "unlimitedStorage"],
   "host_permissions": [
     "https://www.bilibili.com/*",
     "https://api.bilibili.com/*",

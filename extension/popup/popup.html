@@ -38,10 +38,38 @@
           </select>
         </label>
 
-        <button id="extractButton" class="secondary" type="button" disabled>
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>
-          <span class="button-label">提取字幕</span>
-        </button>
+        <div id="extractModeTabs" class="mode-tabs" hidden>
+          <button id="singleModeButton" class="mode-tab active" type="button">
+            <span class="button-label">单条</span>
+          </button>
+          <button id="collectionModeButton" class="mode-tab" type="button" disabled>
+            <span class="button-label">合集</span>
+          </button>
+        </div>
+
+        <div id="singleExtractPanel" class="extract-panel">
+          <button id="extractButton" class="secondary" type="button" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>
+            <span class="button-label">提取字幕</span>
+          </button>
+        </div>
+
+        <div id="collectionExtractPanel" class="extract-panel" hidden>
+          <label id="collectionRangeField" class="field" for="collectionRangeSelect">
+            <span>合集范围</span>
+            <select id="collectionRangeSelect">
+              <option value="20">前 20 个</option>
+              <option value="50">前 50 个</option>
+              <option value="100">前 100 个</option>
+              <option value="all">全部</option>
+            </select>
+          </label>
+
+          <button id="extractCollectionButton" class="secondary" type="button" disabled>
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 12h8M8 15h5"/></svg>
+            <span class="button-label">提取合集</span>
+          </button>
+        </div>
       </section>
 
       <section id="resultPanel" class="card result" hidden>
@@ -57,6 +85,14 @@
         </div>
 
         <pre id="preview" class="preview"></pre>
+
+        <div id="collectionPanel" class="collection-panel" hidden>
+          <div class="collection-panel__head">
+            <span>合集视频</span>
+            <strong id="collectionCount">0</strong>
+          </div>
+          <div id="collectionList" class="collection-list"></div>
+        </div>
 
         <div class="actions export-actions">
           <button id="copyMarkdownButton" type="button">

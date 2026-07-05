@@ -1,6 +1,7 @@
 (() => {
   const EXTENSION_SOURCE = "browser-caption-extension";
   const PAGE_SOURCE = "browser-caption-extension-page";
+  let wbiKeysPromise = null;
 
   const MIXIN_KEY_ENC_TAB = [
     46, 47, 18, 2, 53, 8, 23, 32,
@@ -40,8 +41,7 @@
     return JSON.parse(text);
   }
 
-  async function loadVideoMetadata() {
-    const bilibiliVideoId = parseBilibiliVideoId();
+  async function loadVideoMetadata(bilibiliVideoId = parseBilibiliVideoId()) {
     const video = await fetchJson(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bilibiliVideoId)}`);
 
     if (video.code !== 0 || !video.data) {
@@ -55,7 +55,7 @@
     return {
       platform: "bilibili",
       videoId: bilibiliVideoId,
-      url: location.href,
+      url: bilibiliVideoId === parseBilibiliVideoId() ? location.href : `https://www.bilibili.com/video/${bilibiliVideoId}/`,
       aid,
       cid,
       title: video.data.title || document.title.replace(/_哔哩哔哩_bilibili$/, ""),
@@ -64,7 +64,148 @@
     };
   }
 
+  function loadCollectionMetadata() {
+    const fromState = loadCollectionFromInitialState();
+    if (fromState.items.length) return fromState;
+
+    const fromPages = loadMultipartFromInitialState();
+    if (fromPages.items.length) return fromPages;
+
+    return loadCollectionFromDom();
+  }
+
+  function loadCollectionFromInitialState() {
+    const state = window.__INITIAL_STATE__ || {};
+    const season = state.videoData?.ugc_season || state.sectionsInfo;
+    const sections = Array.isArray(season?.sections) ? season.sections : [];
+    const items = sections
+      .flatMap((section) => Array.isArray(section.episodes) ? section.episodes : [])
+      .map(normalizeCollectionEpisode)
+      .filter(Boolean);
+
+    return {
+      id: season?.id || season?.season_id || state.videoData?.season_id,
+      title: season?.title || "",
+      source: "initial_state",
+      items: dedupeCollectionItems(items)
+    };
+  }
+
+  function loadCollectionFromDom() {
+    const title = document.querySelector(".video-pod__header .title")?.textContent?.trim() || "";
+    const items = Array.from(document.querySelectorAll(".video-pod__list.section [data-key], .video-pod__list.multip.list [data-key], .video-pod__list.multip [data-key]"))
+      .map((node) => {
+        const bvid = node.getAttribute("data-key");
+        const currentBvid = parseBilibiliVideoId();
+        const page = parseDomPageIndex(node);
+        if (!/^BV[a-zA-Z0-9]+$/i.test(bvid || "") && !currentBvid) return null;
+        const titleText = node.querySelector(".title-txt")?.textContent?.trim()
+          || node.querySelector(".title")?.getAttribute("title")
+          || node.textContent?.trim()
+          || bvid;
+        return {
+          bvid: /^BV[a-zA-Z0-9]+$/i.test(bvid || "") ? bvid : currentBvid,
+          page,
+          title: titleText,
+          url: buildBilibiliVideoUrl(/^BV[a-zA-Z0-9]+$/i.test(bvid || "") ? bvid : currentBvid, page)
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      id: "",
+      title,
+      source: "dom",
+      items: dedupeCollectionItems(items)
+    };
+  }
+
+  function loadMultipartFromInitialState() {
+    const state = window.__INITIAL_STATE__ || {};
+    const data = state.videoData || {};
+    const bvid = data.bvid || parseBilibiliVideoId();
+    const pages = Array.isArray(data.pages) ? data.pages : [];
+    const items = pages
+      .filter((page) => page?.cid)
+      .map((page) => ({
+        bvid,
+        aid: data.aid,
+        cid: page.cid,
+        page: page.page,
+        title: page.part || `${data.title || bvid} P${page.page || ""}`.trim(),
+        url: buildBilibiliVideoUrl(bvid, page.page)
+      }));
+
+    return {
+      id: bvid,
+      title: data.title || document.title.replace(/_哔哩哔哩_bilibili$/, ""),
+      source: "initial_state_pages",
+      items: pages.length > 1 ? dedupeMultipartItems(items) : []
+    };
+  }
+
+  function parseDomPageIndex(node) {
+    const key = node.getAttribute("data-key") || "";
+    const pageMatch = key.match(/^(?:p|page)?(\d+)$/i);
+    if (pageMatch) return Number(pageMatch[1]);
+
+    const text = node.querySelector(".page-num, .index, .title")?.textContent || "";
+    const textMatch = text.match(/^\s*(\d+)\s*[.\u3001]/);
+    return textMatch ? Number(textMatch[1]) : undefined;
+  }
+
+  function buildBilibiliVideoUrl(bvid, page) {
+    const url = new URL(`https://www.bilibili.com/video/${bvid}/`);
+    if (page && Number(page) > 1) url.searchParams.set("p", String(page));
+    return url.toString();
+  }
+
+  function normalizeCollectionEpisode(episode) {
+    const bvid = episode?.bvid;
+    if (!/^BV[a-zA-Z0-9]+$/i.test(bvid || "")) return null;
+
+    return {
+      bvid,
+      aid: episode.aid || episode.arc?.aid,
+      cid: episode.cid || episode.page?.cid || episode.pages?.[0]?.cid,
+      title: episode.title || episode.arc?.title || episode.page?.part || bvid,
+      page: episode.page?.page || episode.pages?.[0]?.page,
+      url: buildBilibiliVideoUrl(bvid, episode.page?.page || episode.pages?.[0]?.page)
+    };
+  }
+
+  function dedupeCollectionItems(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+      const key = item.cid || item.page ? `${item.bvid}:${item.cid || item.page}` : item.bvid;
+      if (!item?.bvid || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function dedupeMultipartItems(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+      const key = `${item.bvid}:${item.cid || item.page || ""}`;
+      if (!item?.bvid || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   async function fetchWbiKeys() {
+    if (wbiKeysPromise) return wbiKeysPromise;
+
+    wbiKeysPromise = fetchWbiKeysUncached().catch((error) => {
+      wbiKeysPromise = null;
+      throw error;
+    });
+
+    return wbiKeysPromise;
+  }
+
+  async function fetchWbiKeysUncached() {
     const nav = await fetchJson("https://api.bilibili.com/x/web-interface/nav");
     const imgUrl = nav.data?.wbi_img?.img_url;
     const subUrl = nav.data?.wbi_img?.sub_url;
@@ -149,10 +290,12 @@
     const player = await loadPlayerData(metadata);
     const rawTracks = player.subtitle?.subtitles || [];
     const availableTracks = rawTracks.map(normalizeTrack);
+    const collection = loadCollectionMetadata();
 
     return {
       ...metadata,
       availableTracks,
+      collection,
       warnings: availableTracks.length ? [] : ["Current video did not expose subtitle tracks."]
     };
   }
@@ -161,6 +304,10 @@
     const track = payload?.track;
     if (!track?.url) throw new Error("No subtitle track URL was provided.");
 
+    return extractSubtitleWithTrack(track, payload.metadata, payload.availableTracks);
+  }
+
+  async function extractSubtitleWithTrack(track, metadata = null, availableTracks = [track]) {
     const subtitleUrl = normalizeSubtitleUrl(track.url);
     const subtitle = await fetchJson(subtitleUrl, { credentials: "omit" });
     const selectedTrack = {
@@ -179,7 +326,7 @@
       throw new Error("Subtitle file was fetched, but it had no readable text segments.");
     }
 
-    const metadata = payload.metadata || await loadVideoMetadata();
+    metadata = metadata || await loadVideoMetadata();
     const text = segments.map((segment) => segment.text).join("\n");
 
     return {
@@ -189,11 +336,138 @@
       title: metadata.title || document.title,
       author: metadata.author,
       selectedTrack,
-      availableTracks: payload.availableTracks || [track],
+      availableTracks,
       segments,
       text,
       warnings: []
     };
+  }
+
+  async function extractCollectionSubtitles(payload) {
+    const collection = payload?.collection?.items?.length ? payload.collection : loadCollectionMetadata();
+    const allItems = collection.items || [];
+    if (!allItems.length) throw new Error("当前页面没有检测到 B 站合集列表。");
+
+    const range = normalizeCollectionRange(payload?.range, allItems.length);
+    const items = allItems.slice(range.startIndex, range.endIndex);
+    if (!items.length) throw new Error("选择的合集范围内没有视频。");
+
+    const preferredLanguage = payload?.track?.language;
+    const preferredLabel = payload?.track?.label;
+    const results = [];
+    const warnings = [];
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const collectionIndex = range.startIndex + index + 1;
+      try {
+        const metadata = await loadCollectionItemMetadata(item);
+        const player = await loadPlayerData(metadata);
+        const availableTracks = (player.subtitle?.subtitles || []).map(normalizeTrack);
+        const track = chooseCollectionTrack(availableTracks, preferredLanguage, preferredLabel);
+        if (!track) {
+          warnings.push(`${collectionIndex}. ${item.title || item.bvid}: 没有可用字幕`);
+          continue;
+        }
+
+        const result = await extractSubtitleWithTrack(track, metadata, availableTracks);
+        results.push({
+          ...result,
+          collectionIndex
+        });
+      } catch (error) {
+        warnings.push(`${collectionIndex}. ${item.title || item.bvid}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (!results.length) {
+      throw new Error(`选择范围内 ${items.length} 个视频都没有提取到字幕。${warnings.length ? ` ${warnings[0]}` : ""}`);
+    }
+
+    const segments = results.flatMap((result) => result.segments.map((segment) => ({
+      ...segment,
+      videoId: result.videoId,
+      videoTitle: result.title,
+      collectionIndex: result.collectionIndex
+    })));
+    const title = collection.title ? `${collection.title} 批量字幕` : "Bilibili 批量字幕";
+    const selectedTrack = {
+      ...results[0].selectedTrack,
+      label: preferredLabel || results[0].selectedTrack.label,
+      language: preferredLanguage || results[0].selectedTrack.language
+    };
+
+    return {
+      platform: "bilibili",
+      kind: "collection",
+      videoId: results[0].videoId,
+      url: location.href,
+      title,
+      author: results[0].author,
+      selectedTrack,
+      availableTracks: payload?.availableTracks || results[0].availableTracks,
+      collection: {
+        id: collection.id,
+        title: collection.title || title,
+        type: collection.source === "initial_state_pages" ? "multipart" : "collection",
+        source: collection.source,
+        totalCount: allItems.length,
+        requestedCount: items.length,
+        successCount: results.length,
+        range,
+        items: allItems.map((item, index) => ({
+          index: index + 1,
+          bvid: item.bvid,
+          title: item.title,
+          url: item.url
+        }))
+      },
+      items: results,
+      segments,
+      text: results.map((result) => [`## ${result.collectionIndex}. ${result.title}`, result.text].join("\n")).join("\n\n"),
+      warnings
+    };
+  }
+
+  function normalizeCollectionRange(range, totalCount) {
+    const startIndex = clampInteger(range?.startIndex, 0, totalCount);
+    const fallbackEndIndex = Math.min(startIndex + 20, totalCount);
+    const endIndex = clampInteger(range?.endIndex, fallbackEndIndex, totalCount);
+    return {
+      startIndex,
+      endIndex: Math.max(startIndex, endIndex)
+    };
+  }
+
+  function clampInteger(value, fallback, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(Math.max(0, Math.floor(number)), max);
+  }
+
+  async function loadCollectionItemMetadata(item) {
+    if (item.aid && item.cid) {
+      return {
+        platform: "bilibili",
+        videoId: item.bvid,
+        url: item.url || `https://www.bilibili.com/video/${item.bvid}/`,
+        aid: item.aid,
+        cid: item.cid,
+        title: item.title || item.bvid,
+        author: window.__INITIAL_STATE__?.videoData?.owner?.name,
+        durationSeconds: item.durationSeconds || item.duration
+      };
+    }
+
+    return loadVideoMetadata(item.bvid);
+  }
+
+  function chooseCollectionTrack(availableTracks, preferredLanguage, preferredLabel) {
+    if (!availableTracks.length) return null;
+    return availableTracks.find((track) => track.language === preferredLanguage)
+      || availableTracks.find((track) => track.label === preferredLabel)
+      || availableTracks.find((track) => track.source === "auto")
+      || availableTracks[0];
   }
 
   function postResult(requestId, ok, data, error) {
@@ -222,6 +496,11 @@
 
       if (message.action === "extractSubtitle") {
         postResult(message.requestId, true, await extractSubtitle(message.payload));
+        return;
+      }
+
+      if (message.action === "extractCollectionSubtitles") {
+        postResult(message.requestId, true, await extractCollectionSubtitles(message.payload));
         return;
       }
 

@@ -20,9 +20,11 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 - Detects the current Bilibili or YouTube video page.
 - Lists available subtitle tracks.
 - Extracts the selected subtitle track.
+- Extracts subtitles from detected Bilibili collections or multi-part videos.
 - Previews subtitle segments in the popup.
 - Exports transcripts as Markdown, SRT, TXT, or JSON.
 - Copies Markdown transcript to the clipboard.
+- Restores the last extracted result when reopening the popup on the same video page.
 - Generates optional AI summaries through OpenAI-compatible Chat Completions APIs.
 - Supports provider presets for OpenAI, DeepSeek, Qwen / Alibaba Cloud Model Studio, MiniMax, and custom compatible endpoints.
 
@@ -30,8 +32,8 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 
 Download the packaged extension from either:
 
-- GitHub Releases: `chrono-extension-v0.2.2.zip`
-- Repository artifact: `releases/chrono-extension-v0.2.2.zip`
+- GitHub Releases: `chrono-extension-v0.3.0.zip`
+- Repository artifact: `releases/chrono-extension-v0.3.0.zip`
 
 Then:
 
@@ -48,6 +50,8 @@ Then:
 1. Click **获取字幕轨道** to load available subtitle tracks.
 2. Select a subtitle language.
 3. Click **提取字幕**.
+   - On Bilibili collection or multi-part pages, choose a range, then click **提取合集** to batch extract subtitles with the selected language.
+   - After batch extraction, choose **合集总览** or a single video in the result list before exporting or generating an AI summary.
 4. Use the export actions:
    - **复制 MD**
    - **下载 MD**
@@ -83,6 +87,7 @@ API keys, model settings, and the custom summary prompt are stored locally in `c
 - Chrono does not ask you to paste browser cookies.
 - Bilibili and YouTube metadata and subtitle-track discovery run in the video page context so the browser can use the active session naturally.
 - Subtitle-track discovery and subtitle fetching are handled by platform page scripts, while `content/content.js` only routes popup requests.
+- Extracted results are cached locally in `chrome.storage.local`; `unlimitedStorage` is used so large Bilibili collection transcripts can be restored after reopening the popup.
 - AI requests are optional and only run after the user clicks the summary button.
 
 ## Project Structure

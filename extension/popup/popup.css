@@ -246,6 +246,42 @@ button.copied {
   color: #12633d;
 }
 
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f5f7fb;
+}
+
+.mode-tabs[hidden],
+.extract-panel[hidden] {
+  display: none;
+}
+
+.mode-tab {
+  min-height: 28px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mode-tab.active {
+  border-color: var(--line-strong);
+  background: var(--card-strong);
+  color: var(--blue-ink);
+  box-shadow: 0 3px 10px rgba(18, 31, 56, 0.06);
+}
+
+.extract-panel {
+  display: grid;
+  gap: 7px;
+}
+
 .primary {
   border-color: transparent;
   background: var(--blue);
@@ -285,7 +321,8 @@ button.copied {
 
 .result[hidden],
 .ai-settings[hidden],
-.summary[hidden] {
+.summary[hidden],
+.collection-panel[hidden] {
   display: none;
 }
 
@@ -324,6 +361,49 @@ button.copied {
   max-height: 178px;
   min-height: 96px;
   background: linear-gradient(180deg, #fbfdff, #ffffff);
+}
+
+.collection-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.collection-panel__head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.collection-panel__head strong {
+  color: var(--blue-ink);
+}
+
+.collection-list {
+  display: grid;
+  gap: 4px;
+  overflow: auto;
+  max-height: 132px;
+  padding: 2px;
+}
+
+.collection-item {
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0 8px;
+  border-color: var(--line);
+  background: #fbfcff;
+  font-size: 11px;
+}
+
+.collection-item .button-label {
+  text-align: left;
+}
+
+.collection-item.active {
+  border-color: rgba(22, 119, 255, 0.38);
+  background: var(--blue-soft);
+  color: var(--blue-ink);
 }
 
 .actions {

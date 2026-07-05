@@ -1,8 +1,10 @@
 (() => {
-if (window.__BCE_CONTENT_SCRIPT_LOADED__) {
+const CONTENT_SCRIPT_VERSION = "2026-07-05-collection-port";
+if (window.__BCE_CONTENT_SCRIPT_VERSION__ === CONTENT_SCRIPT_VERSION) {
   return;
 }
 window.__BCE_CONTENT_SCRIPT_LOADED__ = true;
+window.__BCE_CONTENT_SCRIPT_VERSION__ = CONTENT_SCRIPT_VERSION;
 
 const EXTENSION_SOURCE = "browser-caption-extension";
 const PAGE_SOURCE = "browser-caption-extension-page";
@@ -25,6 +27,7 @@ const PLATFORM_CONFIG = {
 const MESSAGE_ROUTES = {
   BCE_GET_BILIBILI_TRACKS: { platform: "bilibili", action: "getTracks" },
   BCE_EXTRACT_BILIBILI_SUBTITLE: { platform: "bilibili", action: "extractSubtitle" },
+  BCE_EXTRACT_BILIBILI_COLLECTION_SUBTITLES: { platform: "bilibili", action: "extractCollectionSubtitles" },
   BCE_GET_YOUTUBE_TRACKS: { platform: "youtube", action: "getTracks" },
   BCE_EXTRACT_YOUTUBE_SUBTITLE: { platform: "youtube", action: "extractSubtitle" },
   BCE_GET_TRACKS: { platform: null, action: "getTracks" },
@@ -93,10 +96,11 @@ async function sendToPage(action, payload = {}) {
   );
 
   return new Promise((resolve, reject) => {
+    const timeoutMs = action === "extractCollectionSubtitles" ? 180000 : 30000;
     const timeoutId = window.setTimeout(() => {
       pendingRequests.delete(requestId);
       reject(new Error("Timed out while waiting for the page extractor."));
-    }, 30000);
+    }, timeoutMs);
 
     pendingRequests.set(requestId, { resolve, reject, timeoutId });
   });
@@ -143,6 +147,42 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return true;
 });
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "BCE_LONG_TASK") return;
+
+  port.onMessage.addListener((message) => {
+    if (!message || typeof message.type !== "string") {
+      postPortResult(port, false, null, "Invalid long task message.");
+      return;
+    }
+
+    const route = MESSAGE_ROUTES[message.type];
+    if (!route) {
+      postPortResult(port, false, null, `Unsupported message type: ${message.type}`);
+      return;
+    }
+
+    const currentPlatform = getCurrentPlatform();
+    if (route.platform && route.platform !== currentPlatform) {
+      postPortResult(port, false, null, `Message ${message.type} cannot run on ${currentPlatform || "unsupported"} page.`);
+      return;
+    }
+
+    sendToPage(route.action, normalizePayload(message.payload || {}, currentPlatform))
+      .then((data) => postPortResult(port, true, data))
+      .catch((error) => postPortResult(port, false, null, error.message));
+  });
+});
+
+function postPortResult(port, ok, data, error) {
+  try {
+    port.postMessage({ ok, data, error });
+    port.disconnect();
+  } catch (_error) {
+    // The popup may have been closed before the long task finished.
+  }
+}
 
 function normalizePayload(payload, platform) {
   return {

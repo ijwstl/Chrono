@@ -2,7 +2,10 @@ const state = {
   tab: null,
   metadata: null,
   tracks: [],
+  collection: null,
+  extractMode: "single",
   result: null,
+  activeResult: null,
   summary: "",
   aiSettings: {
     provider: "openai",
@@ -18,6 +21,11 @@ const DEFAULT_AI_PROMPT = [
   "根据字幕输出结构化总结，不要编造字幕中没有的信息。",
   "输出包含：一句话概括、要点列表、关键术语、适合复习的时间线。"
 ].join("\n");
+
+const RESULT_CACHE_KEY = "chronoLastSubtitleResult";
+const RESULT_CACHE_CHUNK_PREFIX = "chronoLastSubtitleResultChunk";
+const RESULT_CACHE_VERSION = 1;
+const RESULT_CACHE_CHUNK_SIZE = 240000;
 
 const AI_PROVIDERS = {
   openai: {
@@ -58,7 +66,8 @@ const PLATFORM_CONFIG = {
     authorLabel: "UP 主",
     messageTypes: {
       getTracks: "BCE_GET_BILIBILI_TRACKS",
-      extractSubtitle: "BCE_EXTRACT_BILIBILI_SUBTITLE"
+      extractSubtitle: "BCE_EXTRACT_BILIBILI_SUBTITLE",
+      extractCollectionSubtitles: "BCE_EXTRACT_BILIBILI_COLLECTION_SUBTITLES"
     },
     isVideoUrl: isBilibiliVideoUrl,
     parseVideoId: parseBilibiliVideoId,
@@ -103,6 +112,7 @@ const EXPORT_FORMATS = {
 const BUTTON_ICON_HTML = {
   loadTracksButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H9l-4 4v-4.5A2.5 2.5 0 0 1 4 13.5v-8Z"/><path d="M8 8h8M8 11.5h5"/></svg>',
   extractButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11"/><path d="m7 9 5 5 5-5"/><path d="M5 19h14"/></svg>',
+  extractCollectionButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h6l2 2h8v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 12h8M8 15h5"/></svg>',
   copyMarkdownButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8h10v12H8z"/><path d="M6 16H4V4h12v2"/></svg>',
   downloadMarkdownButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 10 4 4 4-4"/><path d="M5 20h14"/></svg>',
   downloadJsonButton: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4H6a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2"/><path d="M16 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"/></svg>',
@@ -123,11 +133,22 @@ const nodes = {
   videoAuthor: document.getElementById("videoAuthor"),
   loadTracksButton: document.getElementById("loadTracksButton"),
   trackSelect: document.getElementById("trackSelect"),
+  extractModeTabs: document.getElementById("extractModeTabs"),
+  singleModeButton: document.getElementById("singleModeButton"),
+  collectionModeButton: document.getElementById("collectionModeButton"),
+  singleExtractPanel: document.getElementById("singleExtractPanel"),
+  collectionExtractPanel: document.getElementById("collectionExtractPanel"),
+  collectionRangeField: document.getElementById("collectionRangeField"),
+  collectionRangeSelect: document.getElementById("collectionRangeSelect"),
   extractButton: document.getElementById("extractButton"),
+  extractCollectionButton: document.getElementById("extractCollectionButton"),
   resultPanel: document.getElementById("resultPanel"),
   segmentCount: document.getElementById("segmentCount"),
   selectedLanguage: document.getElementById("selectedLanguage"),
   preview: document.getElementById("preview"),
+  collectionPanel: document.getElementById("collectionPanel"),
+  collectionCount: document.getElementById("collectionCount"),
+  collectionList: document.getElementById("collectionList"),
   copyMarkdownButton: document.getElementById("copyMarkdownButton"),
   downloadMarkdownButton: document.getElementById("downloadMarkdownButton"),
   downloadJsonButton: document.getElementById("downloadJsonButton"),
@@ -165,6 +186,8 @@ async function init() {
     nodes.videoTitle.textContent = "请打开 B 站或 YouTube 视频页面";
     nodes.videoId.textContent = "-";
     nodes.loadTracksButton.disabled = true;
+    nodes.extractModeTabs.hidden = true;
+    selectExtractMode("single");
     setMessage("支持 https://www.bilibili.com/video/BV... 和 https://www.youtube.com/watch?v=... 页面。", true);
     return;
   }
@@ -173,12 +196,18 @@ async function init() {
   setStatus("可提取", "ok");
   nodes.videoId.textContent = videoId || "-";
   nodes.videoTitle.textContent = tab.title ? cleanPlatformTitle(tab.title, platform) : `已检测到 ${getPlatformLabel(platform)} 视频`;
-  setMessage("点击获取字幕轨道。");
+  const restored = await restoreCachedResult(platform, videoId);
+  if (!restored) {
+    setMessage("点击获取字幕轨道。");
+  }
 }
 
 function bindEvents() {
   nodes.loadTracksButton.addEventListener("click", loadTracks);
+  nodes.singleModeButton.addEventListener("click", () => selectExtractMode("single"));
+  nodes.collectionModeButton.addEventListener("click", () => selectExtractMode("collection"));
   nodes.extractButton.addEventListener("click", extractSubtitle);
+  nodes.extractCollectionButton.addEventListener("click", extractCollectionSubtitles);
   nodes.copyMarkdownButton.addEventListener("click", copyMarkdown);
   nodes.downloadMarkdownButton.addEventListener("click", () => downloadText("md"));
   nodes.downloadJsonButton.addEventListener("click", () => downloadText("json"));
@@ -198,12 +227,16 @@ async function loadTracks() {
   setBusy(nodes.loadTracksButton, true, "获取中");
   setMessage("正在读取当前页面字幕轨道。");
   nodes.resultPanel.hidden = true;
+  nodes.collectionPanel.hidden = true;
 
   try {
     const data = await sendToContent(getMessageType("getTracks"));
     state.metadata = data;
     state.tracks = data.availableTracks || [];
+    state.collection = data.collection?.items?.length ? data.collection : null;
+    state.extractMode = "single";
     state.result = null;
+    state.activeResult = null;
     state.summary = "";
     resetSummary();
     nodes.summarizeButton.disabled = true;
@@ -216,17 +249,92 @@ async function loadTracks() {
 
     if (!state.tracks.length) {
       nodes.extractButton.disabled = true;
+      updateCollectionButton();
       setMessage("当前视频没有暴露字幕轨道。", true);
       return;
     }
 
     nodes.extractButton.disabled = false;
-    setMessage(`找到 ${state.tracks.length} 条字幕轨道。`);
+    updateCollectionButton();
+    const collectionCount = getCollectionItems().length;
+    const collectionSuffix = collectionCount > 1 ? `，检测到合集 ${collectionCount} 个视频。` : "";
+    setMessage(`找到 ${state.tracks.length} 条字幕轨道${collectionSuffix}`);
   } catch (error) {
     setMessage(error.message, true);
   } finally {
     setBusy(nodes.loadTracksButton, false, "获取字幕轨道");
   }
+}
+
+function updateCollectionButton() {
+  const isBilibili = (state.metadata?.platform || getSupportedPlatform(state.tab?.url)) === "bilibili";
+  const hasCollection = isBilibili && hasBilibiliCollection();
+  nodes.extractModeTabs.hidden = !hasCollection;
+  nodes.collectionModeButton.disabled = !hasCollection;
+  nodes.extractCollectionButton.disabled = !hasCollection || !state.tracks.length;
+  if (hasCollection) {
+    updateCollectionRangeOptions();
+  } else {
+    state.extractMode = "single";
+  }
+  selectExtractMode(state.extractMode === "collection" && hasCollection ? "collection" : "single");
+}
+
+function selectExtractMode(mode) {
+  const hasCollection = hasBilibiliCollection();
+  state.extractMode = mode === "collection" && hasCollection ? "collection" : "single";
+  const isCollectionMode = state.extractMode === "collection";
+
+  nodes.singleModeButton.classList.toggle("active", !isCollectionMode);
+  nodes.collectionModeButton.classList.toggle("active", isCollectionMode);
+  nodes.singleExtractPanel.hidden = isCollectionMode;
+  nodes.collectionExtractPanel.hidden = !isCollectionMode;
+}
+
+function hasBilibiliCollection() {
+  return getCollectionItems().length > 1;
+}
+
+function getCollectionItems() {
+  return getCollectionMetadata()?.items || [];
+}
+
+function getCollectionMetadata() {
+  if (state.collection?.items?.length) return state.collection;
+  if (state.metadata?.collection?.items?.length) return state.metadata.collection;
+  if (state.result?.collection?.items?.length) return state.result.collection;
+  return null;
+}
+
+function updateCollectionRangeOptions() {
+  const total = getCollectionItems().length;
+  const currentValue = nodes.collectionRangeSelect.value || "20";
+  const options = [
+    { value: "20", label: `前 ${Math.min(20, total)} 个` },
+    { value: "50", label: `前 ${Math.min(50, total)} 个` },
+    { value: "100", label: `前 ${Math.min(100, total)} 个` },
+    { value: "all", label: `全部 ${total} 个` }
+  ].filter((option, index, list) => index === list.findIndex((item) => item.label === option.label));
+
+  nodes.collectionRangeSelect.innerHTML = "";
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    nodes.collectionRangeSelect.appendChild(node);
+  }
+  nodes.collectionRangeSelect.value = options.some((option) => option.value === currentValue) ? currentValue : "20";
+}
+
+function getCollectionRangePayload() {
+  const value = nodes.collectionRangeSelect.value || "20";
+  const total = getCollectionItems().length;
+  const limit = value === "all" ? total : Math.min(Number(value) || 20, total);
+  return {
+    startIndex: 0,
+    endIndex: limit,
+    label: value === "all" ? `全部 ${total} 个` : `前 ${limit} 个`
+  };
 }
 
 async function extractSubtitle() {
@@ -235,6 +343,7 @@ async function extractSubtitle() {
   const currentVideoId = parsePlatformVideoId(state.tab?.url, platform);
   if (state.metadata?.videoId && currentVideoId && state.metadata.videoId !== currentVideoId) {
     state.result = null;
+    state.activeResult = null;
     state.summary = "";
     nodes.extractButton.disabled = true;
     nodes.summarizeButton.disabled = true;
@@ -259,15 +368,71 @@ async function extractSubtitle() {
       availableTracks: state.tracks
     });
     state.result = data;
+    state.activeResult = data;
     state.summary = "";
     renderResult(data);
     resetSummary();
     nodes.summarizeButton.disabled = false;
-    setMessage("字幕提取完成。");
+    const cached = await saveResultCache();
+    if (cached) setMessage("字幕提取完成。");
   } catch (error) {
     setMessage(error.message, true);
   } finally {
     setBusy(nodes.extractButton, false, "提取字幕");
+  }
+}
+
+async function extractCollectionSubtitles() {
+  await refreshActiveTab();
+  const platform = getSupportedPlatform(state.tab?.url);
+  if (platform !== "bilibili") {
+    setMessage("合集批量提取目前只支持 B 站。", true);
+    return;
+  }
+
+  const track = state.tracks.find((item) => item.id === nodes.trackSelect.value);
+  if (!track) {
+    setMessage("请先选择字幕语言。", true);
+    return;
+  }
+
+  const collection = getCollectionMetadata();
+  if (!collection?.items?.length) {
+    setMessage("当前页面没有检测到合集列表。", true);
+    return;
+  }
+
+  setBusy(nodes.extractCollectionButton, true, "提取中");
+  nodes.extractButton.disabled = true;
+  const range = getCollectionRangePayload();
+  setMessage(`正在批量提取合集字幕，范围：${range.label}，可能需要一点时间。`);
+
+  try {
+    const data = await sendLongTaskToContent(getMessageType("extractCollectionSubtitles"), {
+      track,
+      metadata: state.metadata,
+      availableTracks: state.tracks,
+      collection,
+      range
+    });
+    state.result = data;
+    state.activeResult = data;
+    state.summary = "";
+    renderResult(data);
+    resetSummary();
+    nodes.summarizeButton.disabled = false;
+    const cached = await saveResultCache();
+    const requestedCount = data.collection?.requestedCount || data.items?.length || 0;
+    const skippedCount = requestedCount ? requestedCount - (data.collection?.successCount || data.items?.length || 0) : data.warnings?.length || 0;
+    if (cached) {
+      setMessage(`合集字幕提取完成：请求 ${requestedCount} 个，成功 ${data.items?.length || 0} 个${skippedCount ? `，跳过 ${skippedCount} 个` : ""}。`, skippedCount > 0);
+    }
+  } catch (error) {
+    setMessage(error.message, true);
+  } finally {
+    setBusy(nodes.extractCollectionButton, false, "提取合集");
+    nodes.extractCollectionButton.disabled = !hasBilibiliCollection() || !state.tracks.length;
+    nodes.extractButton.disabled = !state.tracks.length;
   }
 }
 
@@ -300,9 +465,208 @@ function renderTracks() {
 
 function renderResult(result) {
   nodes.resultPanel.hidden = false;
-  nodes.segmentCount.textContent = String(result.segments.length);
-  nodes.selectedLanguage.textContent = result.selectedTrack.label || result.selectedTrack.language;
-  nodes.preview.textContent = result.segments.slice(0, 80).map(formatSegment).join("\n");
+  state.activeResult = result;
+  renderCollectionList(result);
+  renderActiveResult();
+}
+
+function renderActiveResult() {
+  const result = getActiveResult();
+  if (!result) return;
+
+  nodes.segmentCount.textContent = String(result.segments?.length || 0);
+  nodes.selectedLanguage.textContent = result.kind === "collection"
+    ? `${result.selectedTrack.label || result.selectedTrack.language} · ${result.items?.length || 0} 个视频`
+    : result.selectedTrack.label || result.selectedTrack.language;
+  nodes.preview.textContent = formatPreview(result);
+  updateCollectionSelection();
+}
+
+async function restoreCachedResult(platform, videoId) {
+  const cache = await readResultCache();
+  if (!isUsableResultCache(cache, platform, videoId)) return false;
+
+  state.metadata = cache.metadata || null;
+  state.tracks = cache.tracks || cache.result?.availableTracks || [];
+  state.collection = cache.collection || state.metadata?.collection || cache.result?.collection || null;
+  state.result = cache.result;
+  state.activeResult = cache.result;
+  state.summary = cache.summary || "";
+
+  if (state.metadata) {
+    nodes.videoId.textContent = state.metadata.videoId || videoId || "-";
+    nodes.videoTitle.textContent = state.metadata.title || state.result.title || nodes.videoTitle.textContent;
+    nodes.videoAuthor.textContent = state.metadata.author ? `${getPlatformAuthorLabel(state.metadata.platform)}：${state.metadata.author}` : "";
+  }
+
+  renderTracks();
+  if (cache.selectedTrackId && state.tracks.some((track) => track.id === cache.selectedTrackId)) {
+    nodes.trackSelect.value = cache.selectedTrackId;
+  }
+  nodes.extractButton.disabled = !state.tracks.length;
+  updateCollectionButton();
+  renderResult(state.result);
+  state.activeResult = state.result;
+  renderActiveResult();
+  if (state.summary) renderSummary(state.summary);
+  else resetSummary();
+  nodes.summarizeButton.disabled = !state.activeResult;
+  setMessage(`已恢复上次提取结果：${formatCacheAge(cache.savedAt)}。`);
+  return true;
+}
+
+function isUsableResultCache(cache, platform, videoId) {
+  if (!cache || cache.version !== RESULT_CACHE_VERSION || !cache.result) return false;
+  if (cache.platform !== platform) return false;
+  if (cache.videoId && videoId && cache.videoId !== videoId && !doesCollectionContainVideo(cache.result, videoId)) return false;
+  return Date.now() - Number(cache.savedAt || 0) < 7 * 24 * 60 * 60 * 1000;
+}
+
+function doesCollectionContainVideo(result, videoId) {
+  return isCollectionResult(result) && result.items.some((item) => item.videoId === videoId || item.bvid === videoId);
+}
+
+async function saveResultCache() {
+  if (!state.result) return false;
+
+  const platform = state.result.platform || state.metadata?.platform || getSupportedPlatform(state.tab?.url);
+  const videoId = parsePlatformVideoId(state.tab?.url, platform) || state.metadata?.videoId || state.result.videoId;
+  const cache = {
+    version: RESULT_CACHE_VERSION,
+    savedAt: Date.now(),
+    platform,
+    videoId,
+    selectedTrackId: nodes.trackSelect.value,
+    metadata: state.metadata,
+    tracks: state.tracks,
+    collection: state.collection,
+    result: state.result,
+    summary: state.summary
+  };
+
+  try {
+    await writeResultCache(cache);
+    return true;
+  } catch (error) {
+    setMessage(`结果已提取，但缓存保存失败：${error.message}`, true);
+    return false;
+  }
+}
+
+async function readResultCache() {
+  const stored = await chrome.storage.local.get([RESULT_CACHE_KEY]);
+  const manifest = stored[RESULT_CACHE_KEY];
+  if (!manifest) return null;
+
+  if (!manifest.chunked) return manifest;
+  if (!manifest.chunkCount) return null;
+
+  const keys = Array.from({ length: manifest.chunkCount }, (_item, index) => getResultCacheChunkKey(manifest.cacheId, index));
+  const chunks = await chrome.storage.local.get(keys);
+  const text = keys.map((key) => chunks[key] || "").join("");
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function writeResultCache(cache) {
+  const text = JSON.stringify(cache);
+  const chunks = splitText(text, RESULT_CACHE_CHUNK_SIZE);
+  const previousManifest = (await chrome.storage.local.get([RESULT_CACHE_KEY]))[RESULT_CACHE_KEY];
+  const cacheId = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+  const payload = {
+    [RESULT_CACHE_KEY]: {
+      version: cache.version,
+      savedAt: cache.savedAt,
+      platform: cache.platform,
+      videoId: cache.videoId,
+      chunked: true,
+      cacheId,
+      chunkCount: chunks.length,
+      byteLength: text.length
+    }
+  };
+  chunks.forEach((chunk, index) => {
+    payload[getResultCacheChunkKey(cacheId, index)] = chunk;
+  });
+
+  await chrome.storage.local.set(payload);
+  await removePreviousResultCacheChunks(previousManifest);
+}
+
+function splitText(text, chunkSize) {
+  const chunks = [];
+  for (let index = 0; index < text.length; index += chunkSize) {
+    chunks.push(text.slice(index, index + chunkSize));
+  }
+  return chunks.length ? chunks : [""];
+}
+
+async function removePreviousResultCacheChunks(previousManifest) {
+  if (!previousManifest?.chunkCount) return;
+
+  const keysToRemove = [];
+  for (let index = 0; index < previousManifest.chunkCount; index += 1) {
+    keysToRemove.push(getResultCacheChunkKey(previousManifest.cacheId, index));
+    if (!previousManifest.cacheId) keysToRemove.push(`${RESULT_CACHE_CHUNK_PREFIX}_${index}`);
+  }
+  await chrome.storage.local.remove(keysToRemove);
+}
+
+function getResultCacheChunkKey(cacheId, index) {
+  return cacheId ? `${RESULT_CACHE_CHUNK_PREFIX}_${cacheId}_${index}` : `${RESULT_CACHE_CHUNK_PREFIX}_${index}`;
+}
+
+function renderCollectionList(result) {
+  nodes.collectionList.innerHTML = "";
+  if (!isCollectionResult(result)) {
+    nodes.collectionPanel.hidden = true;
+    return;
+  }
+
+  nodes.collectionPanel.hidden = false;
+  nodes.collectionCount.textContent = `${result.items.length}/${result.collection?.totalCount || result.items.length}`;
+  nodes.collectionList.appendChild(createCollectionButton("collection", "合集总览", result.segments.length));
+
+  for (const item of result.items) {
+    nodes.collectionList.appendChild(createCollectionButton(String(item.collectionIndex), `${item.collectionIndex}. ${item.title}`, item.segments.length));
+  }
+}
+
+function createCollectionButton(targetId, label, segmentCount) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "collection-item";
+  button.dataset.targetId = targetId;
+  button.innerHTML = `${BUTTON_ICON_HTML.extractCollectionButton}<span class="button-label"></span>`;
+  button.querySelector(".button-label").textContent = `${label} · ${segmentCount} 段`;
+  button.addEventListener("click", () => selectCollectionTarget(targetId));
+  return button;
+}
+
+function selectCollectionTarget(targetId) {
+  if (!isCollectionResult(state.result)) return;
+
+  state.activeResult = targetId === "collection"
+    ? state.result
+    : state.result.items.find((item) => String(item.collectionIndex) === targetId) || state.result;
+  state.summary = "";
+  resetSummary();
+  renderActiveResult();
+  nodes.summarizeButton.disabled = !state.activeResult;
+  setMessage(targetId === "collection" ? "已切换到合集总览。" : "已切换到单个视频。");
+}
+
+function updateCollectionSelection() {
+  const activeId = isCollectionResult(state.activeResult) ? "collection" : String(state.activeResult?.collectionIndex || "");
+  for (const button of nodes.collectionList.querySelectorAll(".collection-item")) {
+    button.classList.toggle("active", button.dataset.targetId === activeId);
+  }
 }
 
 async function loadAiSettings() {
@@ -392,7 +756,8 @@ function renderProviderLabels() {
 }
 
 async function summarizeWithAi() {
-  if (!state.result) {
+  const result = getActiveResult();
+  if (!result) {
     setMessage("请先提取字幕。", true);
     return;
   }
@@ -408,15 +773,16 @@ async function summarizeWithAi() {
   setMessage("正在生成 AI 总结。");
 
   try {
-    const summary = await requestAiSummary(state.result);
+    const summary = await requestAiSummary(result);
     state.summary = summary;
     renderSummary(summary);
+    await saveResultCache();
     setMessage("AI 总结完成。");
   } catch (error) {
     setMessage(error.message, true);
   } finally {
     setBusy(nodes.summarizeButton, false, "AI 总结字幕");
-    nodes.summarizeButton.disabled = !state.result;
+    nodes.summarizeButton.disabled = !getActiveResult();
   }
 }
 
@@ -523,9 +889,10 @@ async function copySummary() {
 }
 
 function downloadSummary() {
-  if (!state.summary || !state.result) return;
-  const filename = `${safeFilename(`${state.result.title || state.result.videoId}-summary`)}.md`;
-  const text = [`# ${state.result.title}`, "", "## AI Summary", "", state.summary, ""].join("\n");
+  const result = getActiveResult();
+  if (!state.summary || !result) return;
+  const filename = `${safeFilename(`${result.title || result.videoId}-summary`)}.md`;
+  const text = [`# ${result.title}`, "", "## AI Summary", "", state.summary, ""].join("\n");
   const url = URL.createObjectURL(new Blob([text], { type: "text/markdown;charset=utf-8" }));
 
   chrome.downloads.download({ url, filename, saveAs: true }, () => {
@@ -545,6 +912,61 @@ function sendToContent(type, payload = {}) {
     });
 
     return sendMessageToTab(type, payload);
+  });
+}
+
+function sendLongTaskToContent(type, payload = {}) {
+  return sendLongTaskMessage(type, payload).catch(async (error) => {
+    if (!/Receiving end does not exist|Could not establish connection|No long task response/i.test(error.message)) {
+      throw error;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: state.tab.id },
+      files: ["content/content.js"]
+    });
+
+    return sendLongTaskMessage(type, payload);
+  });
+}
+
+function sendLongTaskMessage(type, payload = {}) {
+  return new Promise((resolve, reject) => {
+    const port = chrome.tabs.connect(state.tab.id, { name: "BCE_LONG_TASK" });
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      settle(false, new Error("No long task response was received."));
+      try {
+        port.disconnect();
+      } catch (_error) {
+        // Ignore disconnect races.
+      }
+    }, 240000);
+
+    function settle(ok, value) {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      if (ok) resolve(value);
+      else reject(value);
+    }
+
+    port.onMessage.addListener((response) => {
+      if (response?.ok) {
+        settle(true, response.data);
+      } else {
+        settle(false, new Error(response?.error || "Long task failed."));
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      const runtimeError = chrome.runtime.lastError;
+      if (!settled && runtimeError) {
+        settle(false, new Error(runtimeError.message || "Long task connection closed."));
+      }
+    });
+
+    port.postMessage({ type, payload });
   });
 }
 
@@ -574,7 +996,13 @@ function sendMessageToTab(type, payload = {}) {
   });
 }
 
+function getActiveResult() {
+  return state.activeResult || state.result;
+}
+
 function buildMarkdown(result) {
+  if (isCollectionResult(result)) return buildCollectionMarkdown(result);
+
   const lines = [
     "---",
     `platform: ${escapeYaml(result.platform || "unknown")}`,
@@ -596,23 +1024,99 @@ function buildMarkdown(result) {
   return `${lines.join("\n")}\n`;
 }
 
+function buildCollectionMarkdown(result) {
+  const lines = [
+    "---",
+    `platform: ${escapeYaml(result.platform || "unknown")}`,
+    `kind: ${escapeYaml("collection")}`,
+    `source: ${escapeYaml(result.url)}`,
+    `collection_title: ${escapeYaml(result.collection?.title || result.title)}`,
+    `subtitle_language: ${escapeYaml(result.selectedTrack.language)}`,
+    `video_count: ${result.items?.length || 0}`,
+    "---",
+    "",
+    `# ${result.title}`,
+    ""
+  ];
+
+  for (const item of result.items || []) {
+    lines.push(`## ${item.collectionIndex}. ${item.title}`);
+    lines.push("");
+    lines.push(`- BV: ${item.videoId}`);
+    lines.push(`- URL: ${item.url}`);
+    lines.push("");
+
+    for (const segment of item.segments) {
+      lines.push(`[${formatTime(segment.startSeconds)}] ${segment.text}`);
+    }
+
+    lines.push("");
+  }
+
+  if (result.warnings?.length) {
+    lines.push("## Warnings");
+    lines.push("");
+    for (const warning of result.warnings) {
+      lines.push(`- ${warning}`);
+    }
+    lines.push("");
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 function buildPlainText(result) {
+  if (isCollectionResult(result)) {
+    return `${(result.items || []).map((item) => [
+      `${item.collectionIndex}. ${item.title}`,
+      item.text
+    ].join("\n")).join("\n\n")}\n`;
+  }
+
   return `${result.segments.map((segment) => segment.text).join("\n")}\n`;
 }
 
 function buildSrt(result) {
-  const blocks = result.segments.map((segment, index, segments) => {
+  if (isCollectionResult(result)) return buildCollectionSrt(result);
+
+  return `${buildSrtBlocks(result.segments)}\n`;
+}
+
+function buildCollectionSrt(result) {
+  let subtitleIndex = 1;
+  const blocks = [];
+
+  for (const item of result.items || []) {
+    blocks.push(`NOTE ${item.collectionIndex}. ${item.title}`);
+    for (let index = 0; index < item.segments.length; index += 1) {
+      const segment = item.segments[index];
+      const startSeconds = Number(segment.startSeconds) || 0;
+      const endSeconds = resolveSegmentEndSeconds(segment, item.segments[index + 1]);
+      blocks.push([
+        String(subtitleIndex),
+        `${formatSrtTime(startSeconds)} --> ${formatSrtTime(endSeconds)}`,
+        sanitizeSrtText(segment.text)
+      ].join("\n"));
+      subtitleIndex += 1;
+    }
+  }
+
+  return `${blocks.join("\n\n")}\n`;
+}
+
+function buildSrtBlocks(segments, startIndex = 1) {
+  const blocks = segments.map((segment, index, allSegments) => {
     const startSeconds = Number(segment.startSeconds) || 0;
-    const endSeconds = resolveSegmentEndSeconds(segment, segments[index + 1]);
+    const endSeconds = resolveSegmentEndSeconds(segment, allSegments[index + 1]);
 
     return [
-      String(index + 1),
+      String(startIndex + index),
       `${formatSrtTime(startSeconds)} --> ${formatSrtTime(endSeconds)}`,
       sanitizeSrtText(segment.text)
     ].join("\n");
   });
 
-  return `${blocks.join("\n\n")}\n`;
+  return blocks.join("\n\n");
 }
 
 function resolveSegmentEndSeconds(segment, nextSegment) {
@@ -638,19 +1142,21 @@ function sanitizeSrtText(text) {
 }
 
 async function copyMarkdown() {
-  if (!state.result) return;
+  const result = getActiveResult();
+  if (!result) return;
 
-  await navigator.clipboard.writeText(buildMarkdown(state.result));
+  await navigator.clipboard.writeText(buildMarkdown(result));
   showButtonFeedback(nodes.copyMarkdownButton, "已复制", "复制 MD");
   setMessage("Markdown 已复制。");
 }
 
 function downloadText(type) {
-  if (!state.result) return;
+  const result = getActiveResult();
+  if (!result) return;
 
   const format = EXPORT_FORMATS[type] || EXPORT_FORMATS.md;
-  const text = format.build(state.result);
-  const filename = `${safeFilename(state.result.title || state.result.videoId)}.${format.extension}`;
+  const text = format.build(result);
+  const filename = `${safeFilename(result.title || result.videoId)}.${format.extension}`;
   const url = URL.createObjectURL(new Blob([text], { type: `${format.mime};charset=utf-8` }));
 
   chrome.downloads.download({ url, filename, saveAs: true }, () => {
@@ -758,6 +1264,31 @@ function formatSegment(segment) {
   return `[${formatTime(segment.startSeconds)}] ${segment.text}`;
 }
 
+function formatPreview(result) {
+  if (!isCollectionResult(result)) {
+    return result.segments.slice(0, 80).map(formatSegment).join("\n");
+  }
+
+  const lines = [];
+  for (const item of result.items || []) {
+    lines.push(`## ${item.collectionIndex}. ${item.title}`);
+    lines.push(...item.segments.slice(0, 12).map(formatSegment));
+    lines.push("");
+    if (lines.length > 90) break;
+  }
+
+  if (result.warnings?.length) {
+    lines.push("Warnings:");
+    lines.push(...result.warnings.slice(0, 6).map((warning) => `- ${warning}`));
+  }
+
+  return lines.join("\n").trim();
+}
+
+function isCollectionResult(result) {
+  return result?.kind === "collection" && Array.isArray(result.items);
+}
+
 function formatTime(totalSeconds) {
   const seconds = Math.max(0, Math.floor(totalSeconds || 0));
   const hh = Math.floor(seconds / 3600);
@@ -767,6 +1298,16 @@ function formatTime(totalSeconds) {
     return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
   }
   return `${pad(mm)}:${pad(ss)}`;
+}
+
+function formatCacheAge(savedAt) {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - Number(savedAt || 0)) / 1000));
+  if (elapsedSeconds < 60) return "刚刚";
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} 小时前`;
+  return `${Math.floor(elapsedHours / 24)} 天前`;
 }
 
 function formatSrtTime(totalSeconds) {

@@ -315,11 +315,18 @@
       url: subtitleUrl
     };
     const segments = (subtitle.body || [])
-      .map((item) => ({
-        startSeconds: Number(item.from),
-        durationSeconds: typeof item.from === "number" && typeof item.to === "number" ? item.to - item.from : undefined,
-        text: String(item.content || "").replace(/\s+/g, " ").trim()
-      }))
+      .map((item) => {
+        const startSeconds = Number(item.from);
+        const endSeconds = Number(item.to);
+        return {
+          startSeconds: roundSubtitleSeconds(startSeconds),
+          endSeconds: Number.isFinite(endSeconds) ? roundSubtitleSeconds(endSeconds) : undefined,
+          durationSeconds: Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds > startSeconds
+            ? roundSubtitleSeconds(endSeconds - startSeconds)
+            : undefined,
+          text: String(item.content || "").replace(/\s+/g, " ").trim()
+        };
+      })
       .filter((item) => Number.isFinite(item.startSeconds) && item.text.length > 0);
 
     if (!segments.length) {
@@ -443,6 +450,10 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.min(Math.max(0, Math.floor(number)), max);
+  }
+
+  function roundSubtitleSeconds(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
   }
 
   async function loadCollectionItemMetadata(item) {

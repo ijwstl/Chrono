@@ -26,6 +26,7 @@ const RESULT_CACHE_KEY = "chronoLastSubtitleResult";
 const RESULT_CACHE_CHUNK_PREFIX = "chronoLastSubtitleResultChunk";
 const RESULT_CACHE_VERSION = 1;
 const RESULT_CACHE_CHUNK_SIZE = 240000;
+const JSON_TIME_FIELDS = new Set(["startSeconds", "endSeconds", "durationSeconds"]);
 
 const AI_PROVIDERS = {
   openai: {
@@ -95,7 +96,7 @@ const EXPORT_FORMATS = {
   json: {
     extension: "json",
     mime: "application/json",
-    build: (result) => JSON.stringify(result, null, 2)
+    build: buildJson
   },
   srt: {
     extension: "srt",
@@ -1121,6 +1122,11 @@ function buildSrtBlocks(segments, startIndex = 1) {
 
 function resolveSegmentEndSeconds(segment, nextSegment) {
   const startSeconds = Number(segment.startSeconds) || 0;
+  const endSeconds = Number(segment.endSeconds);
+  if (Number.isFinite(endSeconds) && endSeconds > startSeconds) {
+    return endSeconds;
+  }
+
   const durationSeconds = Number(segment.durationSeconds);
   if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
     return startSeconds + durationSeconds;
@@ -1289,15 +1295,23 @@ function isCollectionResult(result) {
   return result?.kind === "collection" && Array.isArray(result.items);
 }
 
+function buildJson(result) {
+  return JSON.stringify(result, (key, value) => {
+    if (!JSON_TIME_FIELDS.has(key) || !Number.isFinite(value)) return value;
+    return Math.round((value + Number.EPSILON) * 1000) / 1000;
+  }, 2);
+}
+
 function formatTime(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(totalSeconds || 0));
-  const hh = Math.floor(seconds / 3600);
-  const mm = Math.floor((seconds % 3600) / 60);
-  const ss = seconds % 60;
-  if (hh > 0) {
-    return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
-  }
-  return `${pad(mm)}:${pad(ss)}`;
+  const totalMilliseconds = Math.max(0, Math.round((Number(totalSeconds) || 0) * 1000));
+  const milliseconds = totalMilliseconds % 1000;
+  const totalWholeSeconds = Math.floor(totalMilliseconds / 1000);
+  const hh = Math.floor(totalWholeSeconds / 3600);
+  const mm = Math.floor((totalWholeSeconds % 3600) / 60);
+  const ss = totalWholeSeconds % 60;
+  const baseTime = hh > 0 ? `${pad(hh)}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+
+  return `${baseTime}.${String(milliseconds).padStart(3, "0")}`;
 }
 
 function formatCacheAge(savedAt) {

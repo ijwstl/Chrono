@@ -30,10 +30,9 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 
 ## Install Locally
 
-Download the packaged extension from either:
+Download the packaged extension from:
 
-- GitHub Releases: `chrono-extension-v0.3.0.zip`
-- Repository artifact: `releases/chrono-extension-v0.3.0.zip`
+- GitHub Releases: `chrono-extension-v0.3.1.zip`
 
 Then:
 
@@ -118,15 +117,18 @@ The popup sends platform-specific messages:
 
 - `BCE_GET_BILIBILI_TRACKS`
 - `BCE_EXTRACT_BILIBILI_SUBTITLE`
+- `BCE_EXTRACT_BILIBILI_COLLECTION_SUBTITLES`
 - `BCE_GET_YOUTUBE_TRACKS`
 - `BCE_EXTRACT_YOUTUBE_SUBTITLE`
 
-`content/content.js` only routes messages. It detects the active platform, injects the matching page script, normalizes payload platform fields, and forwards the action as `getTracks` or `extractSubtitle`.
+`content/content.js` only routes messages. It detects the active platform, injects the matching page script, normalizes payload platform fields, and forwards the action as `getTracks`, `extractSubtitle`, or `extractCollectionSubtitles`.
 
 Platform-specific popup behavior, including message names, URL detection, video-id parsing, title cleanup, and author labels, is declared in `PLATFORM_CONFIG` instead of inline branching.
 
-Each file in `injected/` owns the platform-specific implementation and returns the same result shape: `platform`, `videoId`, `url`, `title`, `author`, `selectedTrack`, `availableTracks`, `segments`, `text`, and `warnings`.
+Each file in `injected/` owns the platform-specific implementation and returns the same result shape for single-video extraction: `platform`, `videoId`, `url`, `title`, `author`, `selectedTrack`, `availableTracks`, `segments`, `text`, and `warnings`.
+
+Bilibili collection and multi-part extraction also returns `kind: "collection"`, `collection`, and `items`, so the popup can switch between **合集总览** and a single extracted video before export or AI summary.
 
 ## Current Scope
 
-Chrono currently focuses on the active Bilibili or YouTube video page. Batch extraction and Obsidian integration are not included yet.
+Chrono currently supports the active Bilibili or YouTube video page, plus batch extraction for detected Bilibili collections and multi-part videos. Obsidian integration is not included yet.

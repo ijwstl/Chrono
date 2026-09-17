@@ -23,11 +23,23 @@
   function getPlayerResponseCandidates() {
     return [
       latestPlayerResponse,
+      getMoviePlayerResponse(),
       getElementPlayerResponse(),
       window.ytInitialPlayerResponse,
       getLegacyPlayerResponse(),
       ...getScriptPlayerResponses()
     ].filter(Boolean);
+  }
+
+  function getMoviePlayerResponse() {
+    const player = document.querySelector("#movie_player");
+    if (typeof player?.getPlayerResponse !== "function") return null;
+
+    try {
+      return player.getPlayerResponse();
+    } catch (_error) {
+      return null;
+    }
   }
 
   function getElementPlayerResponse() {
@@ -116,6 +128,8 @@
       source: isAuto ? "auto" : "manual",
       kind: track.kind || trackUrl.searchParams.get("kind") || "",
       name: trackUrl.searchParams.get("name") || "",
+      variant: trackUrl.searchParams.get("variant") || "",
+      vssId: track.vssId || track.vss_id || "",
       url: track.baseUrl
     };
   }
@@ -150,7 +164,7 @@
     const nativeSegments = extractNativeTextTrackSegments(track);
     const { url: fetchedUrl, segments, diagnostics } = nativeSegments.length
       ? { url: "native-text-track", segments: nativeSegments, diagnostics: "" }
-      : await fetchYouTubeSubtitleSegments(subtitleUrl);
+      : await fetchYouTubeSubtitleSegments(subtitleUrl, track, metadata);
     if (!segments.length) {
       throw new Error(`Subtitle file was fetched, but it had no readable text segments. ${diagnostics}`.trim());
     }
@@ -206,9 +220,9 @@
     return normalizedLeft === normalizedRight || normalizedLeft.split("-")[0] === normalizedRight.split("-")[0];
   }
 
-  function buildSubtitleUrl(track, metadata) {
+  function buildSubtitleUrl(track, metadata, sessionUrl = "") {
     const videoId = parseYouTubeVideoId() || metadata?.videoId;
-    const observedUrl = findObservedTimedTextUrl(videoId, track.language);
+    const observedUrl = sessionUrl || findObservedTimedTextUrl(videoId, track.language);
     const sourceUrl = observedUrl || track.url;
     const parsed = new URL(sourceUrl, location.href);
     const trackParams = new URL(track.url, location.href).searchParams;
@@ -223,6 +237,7 @@
     copyOptionalParam(parsed.searchParams, trackParams, "name");
     copyOptionalParam(parsed.searchParams, trackParams, "kind");
     copyOptionalParam(parsed.searchParams, trackParams, "tlang");
+    copyOptionalParam(parsed.searchParams, trackParams, "variant");
 
     if (track.kind && !parsed.searchParams.has("kind")) {
       parsed.searchParams.set("kind", track.kind);
@@ -323,20 +338,7 @@
   }
 
   function findObservedTimedTextUrl(videoId, language) {
-    const timedTextUrls = [
-      ...observedTimedTextUrls,
-      ...performance.getEntriesByType("resource").map((entry) => entry.name)
-    ]
-      .filter((url, index, urls) => urls.indexOf(url) === index)
-      .filter((url) => /\/api\/timedtext\?/i.test(url))
-      .filter((url) => {
-        try {
-          const parsed = new URL(url, location.href);
-          return !videoId || parsed.searchParams.get("v") === videoId;
-        } catch (_error) {
-          return false;
-        }
-      });
+    const timedTextUrls = getObservedTimedTextUrls(videoId).reverse();
 
     const sameLanguageWithPot = timedTextUrls.find((url) => urlHasLanguageAndPot(url, language));
     if (sameLanguageWithPot) return sameLanguageWithPot;
@@ -350,15 +352,7 @@
     });
     if (anyWithPot) return anyWithPot;
 
-    const sameLanguage = timedTextUrls.find((url) => {
-      try {
-        return new URL(url, location.href).searchParams.get("lang") === language;
-      } catch (_error) {
-        return false;
-      }
-    });
-
-    return sameLanguage || timedTextUrls.at(-1) || "";
+    return "";
   }
 
   function urlHasLanguageAndPot(url, language) {
@@ -455,31 +449,166 @@
     }
   }
 
-  async function fetchYouTubeSubtitleSegments(subtitleUrl) {
-    const json3Text = await fetchSubtitleText(subtitleUrl);
-    const json3Segments = parseYouTubeSubtitle(json3Text);
-    if (json3Segments.length) {
-      return {
-        url: subtitleUrl,
-        segments: json3Segments,
-        diagnostics: ""
-      };
+  async function fetchYouTubeSubtitleSegments(subtitleUrl, track, metadata) {
+    const attempts = [];
+    const initialResult = await tryYouTubeSubtitleUrls(subtitleUrl, attempts);
+    if (initialResult.segments.length) return initialResult;
+
+    const videoId = parseYouTubeVideoId() || metadata?.videoId;
+    const capturedUrl = await forcePlayerTimedTextUrl(track, videoId);
+    if (capturedUrl) {
+      const sessionSubtitleUrl = buildSubtitleUrl(track, metadata, capturedUrl);
+      const sessionResult = await tryYouTubeSubtitleUrls(sessionSubtitleUrl, attempts);
+      if (sessionResult.segments.length) return sessionResult;
     }
 
-    const vttUrl = withQueryParam(subtitleUrl, "fmt", "vtt");
-    const vttText = await fetchSubtitleText(vttUrl);
-    const vttSegments = parseYouTubeSubtitle(vttText);
+    const finalUrl = capturedUrl ? buildSubtitleUrl(track, metadata, capturedUrl) : subtitleUrl;
     return {
-      url: vttUrl,
-      segments: vttSegments,
+      url: finalUrl,
+      segments: [],
       diagnostics: [
-        `url=${redactUrlForDiagnostics(vttUrl)}`,
-        `hasPot=${new URL(vttUrl, location.href).searchParams.has("pot")}`,
-        `observedTimedText=${observedTimedTextUrls.length}`,
-        `json3=${describeYouTubeSubtitleBody(json3Text)}`,
-        `vtt=${describeYouTubeSubtitleBody(vttText)}`
+        `url=${redactUrlForDiagnostics(finalUrl)}`,
+        `hasPot=${new URL(finalUrl, location.href).searchParams.has("pot")}`,
+        `observedTimedText=${getObservedTimedTextUrls(videoId).length}`,
+        `attempts=${attempts.join(", ") || "none"}`
       ].join("; ")
     };
+  }
+
+  async function tryYouTubeSubtitleUrls(subtitleUrl, attempts) {
+    const urls = [
+      withQueryParam(subtitleUrl, "fmt", "json3"),
+      withoutQueryParam(subtitleUrl, "fmt"),
+      withQueryParam(subtitleUrl, "fmt", "vtt")
+    ].filter((url, index, values) => values.indexOf(url) === index);
+
+    for (const url of urls) {
+      const format = new URL(url, location.href).searchParams.get("fmt") || "default";
+      try {
+        const rawText = await fetchSubtitleText(url);
+        const segments = parseYouTubeSubtitle(rawText);
+        attempts.push(`${format}:${describeYouTubeSubtitleBody(rawText)}`);
+        if (segments.length) {
+          return { url, segments, diagnostics: "" };
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        attempts.push(`${format}:error=${message.replace(/ for https?:\/\/\S+$/, "")}`);
+      }
+    }
+
+    return { url: subtitleUrl, segments: [], diagnostics: "" };
+  }
+
+  async function forcePlayerTimedTextUrl(track, videoId) {
+    const player = document.querySelector("#movie_player");
+    if (!player || typeof player.setOption !== "function") return "";
+
+    const playerTrack = getPlayerCaptionTrack(track);
+    if (!playerTrack) return "";
+
+    const previousUrl = getLatestTimedTextUrlWithPot(videoId);
+    let wasSubtitlesOn = false;
+    try {
+      wasSubtitlesOn = typeof player.isSubtitlesOn === "function" && player.isSubtitlesOn();
+    } catch (_error) {
+      wasSubtitlesOn = false;
+    }
+    let previousTrack = null;
+    try {
+      previousTrack = typeof player.getOption === "function" ? player.getOption("captions", "track") : null;
+    } catch (_error) {
+      previousTrack = null;
+    }
+
+    try {
+      if (typeof player.unloadModule === "function") player.unloadModule("captions");
+      await delay(400);
+      if (typeof player.loadModule === "function") player.loadModule("captions");
+      await delay(800);
+      player.setOption("captions", "track", playerTrack);
+
+      const deadline = Date.now() + 3500;
+      while (Date.now() < deadline) {
+        const capturedUrl = getLatestTimedTextUrlWithPot(videoId);
+        if (capturedUrl && capturedUrl !== previousUrl) return capturedUrl;
+        await delay(200);
+      }
+      return "";
+    } finally {
+      restorePlayerCaptionState(player, wasSubtitlesOn, previousTrack);
+    }
+  }
+
+  function getPlayerCaptionTrack(track) {
+    let playerResponse;
+    try {
+      playerResponse = getPlayerResponse();
+    } catch (_error) {
+      return null;
+    }
+
+    const captionTracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    const rawTrack = captionTracks.find((item) => {
+      const itemUrl = new URL(item.baseUrl || "", location.href);
+      const itemVariant = itemUrl.searchParams.get("variant") || "";
+      return item.languageCode === track.language
+        && (item.kind || "") === (track.kind || "")
+        && itemVariant === (track.variant || "");
+    }) || captionTracks.find((item) => item.languageCode === track.language);
+
+    if (!rawTrack) return null;
+    const rawUrl = new URL(rawTrack.baseUrl || track.url, location.href);
+    const playerTrack = {
+      languageCode: rawTrack.languageCode || track.language,
+      kind: rawTrack.kind || track.kind || "",
+      vss_id: rawTrack.vssId || rawTrack.vss_id || track.vssId || ""
+    };
+    const variant = rawUrl.searchParams.get("variant") || track.variant;
+    if (variant) playerTrack.variant = variant;
+    return playerTrack;
+  }
+
+  function restorePlayerCaptionState(player, wasSubtitlesOn, previousTrack) {
+    try {
+      if (wasSubtitlesOn && previousTrack?.languageCode) {
+        player.setOption("captions", "track", previousTrack);
+        return;
+      }
+
+      if (!wasSubtitlesOn && typeof player.isSubtitlesOn === "function" && player.isSubtitlesOn()) {
+        player.toggleSubtitles();
+      }
+    } catch (_error) {
+      // YouTube may replace the player while a single-page navigation is in progress.
+    }
+  }
+
+  function getObservedTimedTextUrls(videoId) {
+    return [
+      ...performance.getEntriesByType("resource").map((entry) => entry.name),
+      ...observedTimedTextUrls
+    ]
+      .filter((url, index, urls) => urls.indexOf(url) === index)
+      .filter((url) => {
+        try {
+          const parsed = new URL(url, location.href);
+          return /\/api\/timedtext$/i.test(parsed.pathname)
+            && (!videoId || parsed.searchParams.get("v") === videoId);
+        } catch (_error) {
+          return false;
+        }
+      });
+  }
+
+  function getLatestTimedTextUrlWithPot(videoId) {
+    return getObservedTimedTextUrls(videoId)
+      .filter((url) => new URL(url, location.href).searchParams.has("pot"))
+      .at(-1) || "";
+  }
+
+  function delay(milliseconds) {
+    return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
   }
 
   async function fetchSubtitleText(url) {
@@ -628,6 +757,12 @@
   function withQueryParam(url, key, value) {
     const parsed = new URL(url, location.href);
     parsed.searchParams.set(key, value);
+    return parsed.toString();
+  }
+
+  function withoutQueryParam(url, key) {
+    const parsed = new URL(url, location.href);
+    parsed.searchParams.delete(key);
     return parsed.toString();
   }
 

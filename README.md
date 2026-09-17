@@ -32,7 +32,7 @@ Chrono is a Chrome / Chromium extension for extracting subtitles from the curren
 
 Download the packaged extension from:
 
-- GitHub Releases: `chrono-extension-v0.3.1.zip`
+- GitHub Releases: `chrono-extension-v0.3.2.zip`
 
 Then:
 
